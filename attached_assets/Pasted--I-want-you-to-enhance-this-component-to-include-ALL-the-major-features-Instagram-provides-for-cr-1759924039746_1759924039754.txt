@@ -1,0 +1,32 @@
+
+
+I want you to enhance this component to include ALL the major features Instagram provides for creating stories, while also drawing inspiration from Telegram's open-source Stories implementation (reference: https://github.com/DrKLO/Telegram for Android client code, searching for "Story" classes; https://github.com/telegramdesktop/tdesktop for Desktop UI). Make it as close to Instagram's functionality as possible, but incorporate Telegram-like efficiencies where they improve modularity or performance (e.g., their ephemeral media handling or contact-based privacy). This includes tagging people, adding locations, applying filters/effects, adding text overlays, stickers (e.g., polls, questions, GIFs), music, hashtags, links (if applicable), drawing tools, and sharing options like "Close Friends" or public. The final code should be fully functional, with proper state management, UI updates, and error handling. Assume we have backend APIs available for any new features (e.g., searching users for tagging, fetching locations, etc.) – use placeholders like apiRequest if needed, and document where integrations are required.
+
+Key requirements:
+1. **Media Handling (Enhance Existing, Inspired by Telegram)**: Keep the current image/video upload and preview. Add support for multiple media items (e.g., swipeable stories, like Telegram's multi-entry stories). Include camera capture (using browser APIs if possible) and gallery selection. Use Telegram's approach for temporary/ephemeral media previews to avoid storage bloat.
+2. **Editing Tools**: Add an editing canvas/mode after media upload, using libraries like Konva.js or Fabric.js for overlays (reference Telegram's Story editor in Android source for drag-and-drop logic). Include:
+   - Text overlays: Add editable text with font styles, colors, sizes, and drag/resize (Telegram-style simple text bubbles).
+   - Drawing: Freehand drawing with color picker and brush sizes.
+   - Stickers: Integration for emojis, GIFs (via Giphy API placeholder), polls, questions, quizzes, countdowns, sliders, and mentions (draw from Telegram's sticker packs API integration).
+   - Filters/Effects: Apply Instagram-like filters (e.g., via CSS filters or Caman.js). Include basic AR effects if feasible (placeholder for WebAR), similar to Telegram's subtle effects.
+3. **Tagging and Mentions**: Allow @tagging users. Add a search input that fetches users via API (e.g., /api/users/search). Tags should appear as clickable overlays on the media, with Telegram-inspired mention previews.
+4. **Location**: Add a location search input that fetches places via API (e.g., /api/locations/search, assuming Google Places or similar backend). Display as a sticker/overlay, like Telegram's geo-story pins.
+5. **Hashtags**: Allow adding #hashtags, either in text or as separate stickers.
+6. **Music**: Add music search and clip selection (via API placeholder like /api/music/search). Preview audio and overlay a music sticker, inspired by Telegram's audio clip handling.
+7. **Links**: Add a link sticker for URLs (restricted to verified users if needed – check user.isVerified).
+8. **Close Friends and Privacy**: Add a toggle or dropdown for sharing options: Public, Close Friends (fetch close friends list via /api/users/close-friends, similar to Telegram's "Selected Contacts"), or specific viewers. Use Telegram's contact picker logic for efficiency.
+9. **Additional Features**: 
+   - Boomerang/reverse video effects (reference Telegram's video processing utils).
+   - Collage layouts for multiple images.
+   - Auto-save drafts (like Telegram's unsent media drafts).
+   - Accessibility: ARIA labels, keyboard navigation.
+   - Animations: Keep/enhance Framer Motion for smooth transitions, matching Telegram's fluid UI.
+   - Testing: Add data-testid attributes to new elements.
+   - Error Handling: Validate inputs, handle API failures with toasts.
+10. **UI/UX**: Make the dialog more interactive – e.g., after upload, switch to an "editor" view with toolbar at the bottom (icons for text, stickers, etc., like Telegram's bottom sheet editors). Preview should update in real-time. On submit, send all data (media, overlays, tags, etc.) in the API payload as JSON, with Telegram-style batching for multi-stories.
+11. **Dependencies**: Suggest any new libraries (e.g., react-icons for more icons, lodash for utils) and add necessary imports. Use Tanstack Query for any new mutations/queries.
+12. **Best Practices**: Use TypeScript types for props/state. Keep code modular – break into sub-components if needed (e.g., StoryEditor, StickerPicker, inspired by Telegram's modular controllers). Ensure mobile responsiveness. Cite specific Telegram code inspirations in comments (e.g., "// Inspired by Telegram's StoryPrivacyBottomSheet").
+
+Output the FULL updated code for the CreateStoryDialog component, including any new sub-components. Explain any major changes or assumptions (including Telegram inspirations) in comments at the top. Do not remove or break existing functionality – build on it.
+
+-
