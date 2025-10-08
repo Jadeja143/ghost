@@ -1,0 +1,3278 @@
+```zip
+social-network-mvp/
+├── backend/
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   ├── main.py
+│   ├── database.py
+│   ├── models.py
+│   ├── schemas.py
+│   ├── websocket.py
+│   ├── tasks.py
+│   ├── routes/
+│   │   ├── auth.py
+│   │   ├── users.py
+│   │   ├── posts.py
+│   │   ├── media.py
+│   │   ├── messages.py
+│   │   ├── notifications.py
+│   │   ├── stories.py
+│   │   ├── follows.py
+│   │   ├── search.py
+│   │   ├── moderation.py
+│   │   ├── analytics.py
+│   ├── migrations/
+│   │   ├── 001_initial_schema.sql
+│   │   ├── 002_add_likes_comments_notifications.sql
+│   │   ├── 003_add_websocket_metadata.sql
+│   │   ├── 004_add_stories_follows_analytics.sql
+│   ├── tests/
+│   │   ├── test_auth.py
+│   │   ├── test_posts.py
+│   │   ├── test_messages.py
+├── frontend/
+│   ├── Dockerfile
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── next.config.js
+│   ├── tailwind.config.js
+│   ├── src/
+│   │   ├── pages/
+│   │   │   ├── index.tsx
+│   │   │   ├── login.tsx
+│   │   │   ├── register.tsx
+│   │   │   ├── profile/[id].tsx
+│   │   │   ├── post/create.tsx
+│   │   │   ├── post/[id].tsx
+│   │   │   ├── messages.tsx
+│   │   │   ├── messages/new.tsx
+│   │   │   ├── notifications.tsx
+│   │   │   ├── stories.tsx
+│   │   │   ├── search.tsx
+│   │   │   ├── admin.tsx
+│   │   ├── components/
+│   │   │   ├── NavBar.tsx
+│   │   │   ├── PostCard.tsx
+│   │   │   ├── MessageCard.tsx
+│   │   │   ├── StoryCard.tsx
+│   │   │   ├── AnalyticsDashboard.tsx
+│   │   ├── styles/
+│   │   │   ├── globals.css
+│   │   ├── lib/
+│   │   │   ├── websocket.ts
+│   │   ├── types.ts
+│   ├── tests/
+│   │   ├── PostCard.test.tsx
+│   │   ├── Messages.test.tsx
+├── .github/
+│   ├── workflows/
+│   │   ├── ci.yml
+├── docker-compose.yml
+├── README.md
+├── .gitignore
+├── figma.json
+├── deploy.sh
+```
+
+### Backend Files
+
+#### backend/Dockerfile
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY requirements.txt .
+RUN apt-get update && apt-get install -y ffmpeg && pip install --no-cache-dir -r requirements.txt
+COPY . .
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+#### backend/requirements.txt
+```text
+fastapi==0.115.2
+uvicorn==0.32.0
+sqlalchemy==2.0.36
+psycopg2-binary==2.9.9
+pydantic==2.9.2
+boto3==1.35.39
+celery==5.4.0
+redis==5.1.1
+passlib[argon2]==1.7.4
+python-jose[cryptography]==3.3.0
+python-multipart==0.0.12
+fastapi-limiter==0.1.6
+pytest==8.3.3
+```
+
+#### backend/main.py
+```python
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi_limiter import FastAPILimiter
+from redis.asyncio import Redis
+from routes import auth, users, posts, media, messages, notifications, stories, follows, search, moderation, analytics
+from websocket import router as ws_router
+import os
+import asyncio
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "https://your-netlify-site.netlify.app"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+async def startup_event():
+    redis = Redis.from_url(os.getenv("REDIS_URL"))
+    await FastAPILimiter.init(redis)
+
+app.add_event_handler("startup", startup_event)
+
+app.include_router(auth.router, prefix="/api/auth")
+app.include_router(users.router, prefix="/api/users")
+app.include_router(posts.router, prefix="/api/posts")
+app.include_router(media.router, prefix="/api/media")
+app.include_router(messages.router, prefix="/api/messages")
+app.include_router(notifications.router, prefix="/api/notifications")
+app.include_router(stories.router, prefix="/api/stories")
+app.include_router(follows.router, prefix="/api/follows")
+app.include_router(search.router, prefix="/api/search")
+app.include_router(moderation.router, prefix="/api/moderation")
+app.include_router(analytics.router, prefix="/api/analytics")
+app.include_router(ws_router, prefix="/ws")
+
+@app.get("/")
+async def root():
+    return {"message": "Social Network MVP API"}
+```
+
+#### backend/database.py
+```python
+from sqlalchemy import create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+import os
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+```
+
+#### backend/models.py
+```python
+from sqlalchemy import Column, String, Boolean, DateTime, Integer, BigInteger, Text
+from sqlalchemy.dialects.postgresql import UUID, JSONB, TSVECTOR
+from sqlalchemy.sql import func
+from database import Base
+import uuid
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    username = Column(String(30), unique=True, nullable=False)
+    email = Column(String(320), unique=True)
+    password_hash = Column(String, nullable=False)
+    display_name = Column(String(100))
+    bio = Column(String)
+    avatar_url = Column(String)
+    verified = Column(Boolean, default=False)
+    joined_at = Column(DateTime(timezone=True), default=func.now())
+    is_active = Column(Boolean, default=True)
+    is_private = Column(Boolean, default=False)
+    last_seen = Column(DateTime(timezone=True))
+    is_online = Column(Boolean, default=False)
+    settings = Column(JSONB, default=dict)
+    search_vector = Column(TSVECTOR)
+
+class Post(Base):
+    __tablename__ = "posts"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False)
+    caption = Column(Text)
+    hashtags = Column(JSONB, default=list)
+    created_at = Column(DateTime(timezone=True), default=func.now())
+    updated_at = Column(DateTime(timezone=True))
+    privacy = Column(String(20), default="public")
+    location = Column(JSONB)
+    like_count = Column(Integer, default=0)
+    comment_count = Column(Integer, default=0)
+    view_count = Column(BigInteger, default=0)
+    is_archived = Column(Boolean, default=False)
+    allow_comments = Column(Boolean, default=True)
+    hide_like_counts = Column(Boolean, default=False)
+    search_vector = Column(TSVECTOR)
+
+class Media(Base):
+    __tablename__ = "media"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    post_id = Column(UUID(as_uuid=True))
+    story_id = Column(UUID(as_uuid=True))
+    owner_id = Column(UUID(as_uuid=True), nullable=False)
+    media_type = Column(String(20))
+    file_key = Column(String)
+    width = Column(Integer)
+    height = Column(Integer)
+    duration = Column(Integer)
+    mime = Column(String)
+    variant = Column(JSONB)
+    uploaded_at = Column(DateTime(timezone=True), default=func.now())
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    is_group = Column(Boolean, default=False)
+    title = Column(String)
+    created_at = Column(DateTime(timezone=True), default=func.now())
+    last_message_at = Column(DateTime(timezone=True))
+
+class Message(Base):
+    __tablename__ = "messages"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    conversation_id = Column(UUID(as_uuid=True), nullable=False)
+    sender_id = Column(UUID(as_uuid=True), nullable=False)
+    content = Column(String)
+    created_at = Column(DateTime(timezone=True), default=func.now())
+    read_by = Column(JSONB, default=list)
+
+class Like(Base):
+    __tablename__ = "likes"
+    user_id = Column(UUID(as_uuid=True), primary_key=True)
+    post_id = Column(UUID(as_uuid=True), primary_key=True)
+    created_at = Column(DateTime(timezone=True), default=func.now())
+
+class Comment(Base):
+    __tablename__ = "comments"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    post_id = Column(UUID(as_uuid=True), nullable=False)
+    user_id = Column(UUID(as_uuid=True), nullable=False)
+    parent_comment_id = Column(UUID(as_uuid=True))
+    content = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=func.now())
+    edited_at = Column(DateTime(timezone=True))
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False)
+    actor_id = Column(UUID(as_uuid=True), nullable=False)
+    type = Column(String(50), nullable=False)
+    target_id = Column(UUID(as_uuid=True))
+    read = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), default=func.now())
+
+class Story(Base):
+    __tablename__ = "stories"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=func.now())
+    expires_at = Column(DateTime(timezone=True))
+
+class Follow(Base):
+    __tablename__ = "follows"
+    follower_id = Column(UUID(as_uuid=True), primary_key=True)
+    followee_id = Column(UUID(as_uuid=True), primary_key=True)
+    created_at = Column(DateTime(timezone=True), default=func.now())
+    approved = Column(Boolean, default=True)
+
+class Report(Base):
+    __tablename__ = "reports"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    reporter_id = Column(UUID(as_uuid=True), nullable=False)
+    target_id = Column(UUID(as_uuid=True), nullable=False)
+    target_type = Column(String(20), nullable=False)
+    reason = Column(String)
+    created_at = Column(DateTime(timezone=True), default=func.now())
+    status = Column(String(20), default="pending")
+
+class AnalyticsEvent(Base):
+    __tablename__ = "analytics_events"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True))
+    target_id = Column(UUID(as_uuid=True))
+    target_type = Column(String(20))
+    event_type = Column(String(50), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=func.now())
+```
+
+#### backend/schemas.py
+```python
+from pydantic import BaseModel, EmailStr
+from uuid import UUID
+from datetime import datetime
+from typing import Optional, Dict, List
+
+class UserCreate(BaseModel):
+    username: str
+    email: Optional[EmailStr]
+    password: str
+
+class UserUpdate(BaseModel):
+    display_name: Optional[str]
+    bio: Optional[str]
+    avatar_url: Optional[str]
+    is_private: Optional[bool]
+
+class UserOut(BaseModel):
+    id: UUID
+    username: str
+    email: Optional[EmailStr]
+    display_name: Optional[str]
+    bio: Optional[str]
+    avatar_url: Optional[str]
+    is_private: bool
+    follower_count: int
+    following_count: int
+
+    class Config:
+        from_attributes = True
+
+class PostCreate(BaseModel):
+    caption: Optional[str]
+    hashtags: Optional[List[str]]
+    privacy: str = "public"
+    media: Optional[List[Dict]]
+
+class PostUpdate(BaseModel):
+    caption: Optional[str]
+    hashtags: Optional[List[str]]
+    privacy: Optional[str]
+
+class PostOut(BaseModel):
+    id: UUID
+    user_id: UUID
+    caption: Optional[str]
+    hashtags: List[str]
+    created_at: datetime
+    like_count: int
+    comment_count: int
+    view_count: int
+    media: Optional[List[Dict]]
+
+    class Config:
+        from_attributes = True
+
+class MediaCreate(BaseModel):
+    file_key: str
+    media_type: str
+    width: Optional[int]
+    height: Optional[int]
+    mime: Optional[str]
+    duration: Optional[int]
+
+class ConversationCreate(BaseModel):
+    title: Optional[str]
+    is_group: bool = False
+    participant_ids: List[UUID]
+
+class MessageCreate(BaseModel):
+    content: str
+    conversation_id: UUID
+
+class MessageOut(BaseModel):
+    id: UUID
+    sender_id: UUID
+    content: str
+    created_at: datetime
+    read_by: List[UUID]
+
+    class Config:
+        from_attributes = True
+
+class LikeCreate(BaseModel):
+    post_id: UUID
+
+class CommentCreate(BaseModel):
+    post_id: UUID
+    content: str
+    parent_comment_id: Optional[UUID]
+
+class CommentOut(BaseModel):
+    id: UUID
+    post_id: UUID
+    user_id: UUID
+    content: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class NotificationOut(BaseModel):
+    id: UUID
+    user_id: UUID
+    actor_id: UUID
+    type: str
+    target_id: Optional[UUID]
+    read: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class StoryCreate(BaseModel):
+    media: Dict
+
+class StoryOut(BaseModel):
+    id: UUID
+    user_id: UUID
+    created_at: datetime
+    expires_at: datetime
+    media: Optional[List[Dict]]
+
+    class Config:
+        from_attributes = True
+
+class FollowCreate(BaseModel):
+    followee_id: UUID
+
+class ReportCreate(BaseModel):
+    target_id: UUID
+    target_type: str
+    reason: str
+
+class AnalyticsEventCreate(BaseModel):
+    target_id: Optional[UUID]
+    target_type: Optional[str]
+    event_type: str
+```
+
+#### backend/routes/auth.py
+```python
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from sqlalchemy.orm import Session
+from passlib.context import CryptContext
+from jose import JWTError, jwt
+from datetime import datetime, timedelta
+import os
+from models import User
+from schemas import UserCreate, UserOut
+from database import get_db
+from fastapi_limiter.depends import RateLimiter
+
+router = APIRouter()
+pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+SECRET_KEY = os.getenv("JWT_SECRET", "your-secret-key")
+ALGORITHM = "HS256"
+
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(minutes=30)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+@router.post("/register", response_model=UserOut, dependencies=[Depends(RateLimiter(times=5, seconds=60))])
+async def register(user: UserCreate, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.username == user.username).first():
+        raise HTTPException(status_code=400, detail="Username already taken")
+    if user.email and db.query(User).filter(User.email == user.email).first():
+        raise HTTPException(status_code=400, detail="Email already taken")
+    hashed_password = pwd_context.hash(user.password)
+    db_user = User(
+        username=user.username,
+        email=user.email,
+        password_hash=hashed_password,
+        search_vector=func.to_tsvector('english', user.username)
+    )
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+@router.post("/login", dependencies=[Depends(RateLimiter(times=10, seconds=60))])
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == form_data.username).first()
+    if not user or not pwd_context.verify(form_data.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    access_token = create_access_token(data={"sub": str(user.id)})
+    return {"access_token": access_token, "token_type": "bearer", "user_id": str(user.id)}
+```
+
+#### backend/routes/users.py
+```python
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from sqlalchemy.sql import func
+from models import User, Follow
+from schemas import UserOut, UserUpdate
+from database import get_db
+from jose import jwt
+from fastapi.security import OAuth2PasswordBearer
+from fastapi_limiter.depends import RateLimiter
+import os
+
+router = APIRouter()
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+SECRET_KEY = os.getenv("JWT_SECRET", "your-secret-key")
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+        user_id = payload.get("sub")
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return user
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+@router.get("/me", response_model=UserOut, dependencies=[Depends(RateLimiter(times=10, seconds=60))])
+async def get_me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    follower_count = db.query(Follow).filter(Follow.followee_id == current_user.id, Follow.approved == True).count()
+    following_count = db.query(Follow).filter(Follow.follower_id == current_user.id, Follow.approved == True).count()
+    return {**current_user.__dict__, "follower_count": follower_count, "following_count": following_count}
+
+@router.patch("/me", response_model=UserOut, dependencies=[Depends(RateLimiter(times=5, seconds=60))])
+async def update_user(user_update: UserUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    for key, value in user_update.dict(exclude_unset=True).items():
+        setattr(current_user, key, value)
+    if user_update.username:
+        current_user.search_vector = func.to_tsvector('english', user_update.username)
+    db.commit()
+    db.refresh(current_user)
+    follower_count = db.query(Follow).filter(Follow.followee_id == current_user.id, Follow.approved == True).count()
+    following_count = db.query(Follow).filter(Follow.follower_id == current_user.id, Follow.approved == True).count()
+    return {**current_user.__dict__, "follower_count": follower_count, "following_count": following_count}
+
+@router.get("/{user_id}", response_model=UserOut, dependencies=[Depends(RateLimiter(times=10, seconds=60))])
+async def get_user(user_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.is_private:
+        follow = db.query(Follow).filter(Follow.follower_id == current_user.id, Follow.followee_id == user_id, Follow.approved == True).first()
+        if not follow and user.id != current_user.id:
+            raise HTTPException(status_code=403, detail="Cannot view private profile")
+    follower_count = db.query(Follow).filter(Follow.followee_id == user.id, Follow.approved == True).count()
+    following_count = db.query(Follow).filter(Follow.follower_id == user.id, Follow.approved == True).count()
+    return {**user.__dict__, "follower_count": follower_count, "following_count": following_count}
+```
+
+#### backend/routes/posts.py
+```python
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from sqlalchemy.sql import func
+from models import Post, User, Like, Comment, Notification, Follow
+from schemas import PostCreate, PostOut, LikeCreate, CommentCreate, CommentOut
+from database import get_db
+from .users import get_current_user
+from redis import Redis
+from fastapi_limiter.depends import RateLimiter
+import os
+import json
+
+router = APIRouter()
+
+def get_redis():
+    return Redis.from_url(os.getenv("REDIS_URL"))
+
+@router.post("/", response_model=PostOut, dependencies=[Depends(RateLimiter(times=5, seconds=60))])
+async def create_post(post: PostCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    db_post = Post(
+        user_id=current_user.id,
+        caption=post.caption,
+        hashtags=post.hashtags or [],
+        privacy=post.privacy,
+        search_vector=func.to_tsvector('english', ' '.join([post.caption or '', *post.hashtags]))
+    )
+    db.add(db_post)
+    db.commit()
+    db.refresh(db_post)
+    return db_post
+
+@router.get("/feed", response_model=list[PostOut], dependencies=[Depends(RateLimiter(times=10, seconds=60))])
+async def get_feed(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    follows = db.query(Follow).filter(Follow.follower_id == current_user.id, Follow.approved == True).all()
+    followee_ids = [f.followee_id for f in follows] + [current_user.id]
+    posts = db.query(Post).filter(
+        Post.user_id.in_(followee_ids),
+        Post.is_archived == False
+    ).order_by(Post.created_at.desc()).limit(20).all()
+    return posts
+
+@router.get("/{post_id}", response_model=PostOut, dependencies=[Depends(RateLimiter(times=10, seconds=60))])
+async def get_post(post_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    post = db.query(Post).filter(Post.id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    if post.privacy == "private":
+        follow = db.query(Follow).filter(Follow.follower_id == current_user.id, Follow.followee_id == post.user_id, Follow.approved == True).first()
+        if not follow and post.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Cannot view private post")
+    post.view_count += 1
+    db.add(AnalyticsEvent(user_id=current_user.id, target_id=post.id, target_type="post", event_type="view"))
+    db.commit()
+    return post
+
+@router.patch("/{post_id}", response_model=PostOut, dependencies=[Depends(RateLimiter(times=5, seconds=60))])
+async def update_post(post_id: str, post_update: PostUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    post = db.query(Post).filter(Post.id == post_id, Post.user_id == current_user.id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found or not authorized")
+    for key, value in post_update.dict(exclude_unset=True).items():
+        setattr(post, key, value)
+    if post_update.caption or post_update.hashtags:
+        post.search_vector = func.to_tsvector('english', ' '.join([post_update.caption or post.caption or '', *post_update.hashtags or post.hashtags]))
+    post.updated_at = func.now()
+    db.commit()
+    db.refresh(post)
+    return post
+
+@router.delete("/{post_id}", dependencies=[Depends(RateLimiter(times=5, seconds=60))])
+async def delete_post(post_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    post = db.query(Post).filter(Post.id == post_id, Post.user_id == current_user.id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found or not authorized")
+    post.is_archived = True
+    db.commit()
+    return {"message": "Post deleted"}
+
+@router.post("/{post_id}/like", dependencies=[Depends(RateLimiter(times=10, seconds=60))])
+async def toggle_like(
+    post_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    post = db.query(Post).filter(Post.id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    if post.privacy == "private":
+        follow = db.query(Follow).filter(Follow.follower_id == current_user.id, Follow.followee_id == post.user_id, Follow.approved == True).first()
+        if not follow and post.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Cannot like private post")
+    
+    existing_like = db.query(Like).filter(
+        Like.user_id == current_user.id,
+        Like.post_id == post_id
+    ).first()
+    
+    redis = get_redis()
+    if existing_like:
+        db.delete(existing_like)
+        post.like_count -= 1
+        db.commit()
+        redis.publish(
+            f"notifications:{post.user_id}",
+            json.dumps({"type": "unlike", "actor_id": str(current_user.id), "post_id": post_id})
+        )
+        return {"liked": False, "like_count": post.like_count}
+    
+    new_like = Like(user_id=current_user.id, post_id=post_id)
+    db.add(new_like)
+    post.like_count += 1
+    
+    notification = Notification(
+        user_id=post.user_id,
+        actor_id=current_user.id,
+        type="like",
+        target_id=post_id
+    )
+    db.add(notification)
+    db.add(AnalyticsEvent(user_id=current_user.id, target_id=post_id, target_type="post", event_type="like"))
+    db.commit()
+    redis.publish(
+        f"notifications:{post.user_id}",
+        json.dumps({"type": "like", "actor_id": str(current_user.id), "post_id": post_id})
+    )
+    return {"liked": True, "like_count": post.like_count}
+
+@router.post("/{post_id}/comment", response_model=CommentOut, dependencies=[Depends(RateLimiter(times=10, seconds=60))])
+async def add_comment(
+    comment: CommentCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    post = db.query(Post).filter(Post.id == comment.post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    if post.privacy == "private":
+        follow = db.query(Follow).filter(Follow.follower_id == current_user.id, Follow.followee_id == post.user_id, Follow.approved == True).first()
+        if not follow and post.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Cannot comment on private post")
+    
+    db_comment = Comment(
+        post_id=comment.post_id,
+        user_id=current_user.id,
+        content=comment.content,
+        parent_comment_id=comment.parent_comment_id
+    )
+    db.add(db_comment)
+    post.comment_count += 1
+    
+    notification = Notification(
+        user_id=post.user_id,
+        actor_id=current_user.id,
+        type="comment",
+        target_id=comment.post_id
+    )
+    db.add(notification)
+    db.add(AnalyticsEvent(user_id=current_user.id, target_id=comment.post_id, target_type="post", event_type="comment"))
+    db.commit()
+    db.refresh(db_comment)
+    
+    redis = get_redis()
+    redis.publish(
+        f"notifications:{post.user_id}",
+        json.dumps({"type": "comment", "actor_id": str(current_user.id), "post_id": str(comment.post_id)})
+    )
+    return db_comment
+
+@router.get("/{post_id}/comments", response_model=list[CommentOut], dependencies=[Depends(RateLimiter(times=10, seconds=60))])
+async def get_comments(post_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    post = db.query(Post).filter(Post.id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    if post.privacy == "private":
+        follow = db.query(Follow).filter(Follow.follower_id == current_user.id, Follow.followee_id == post.user_id, Follow.approved == True).first()
+        if not follow and post.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Cannot view comments on private post")
+    return db.query(Comment).filter(Comment.post_id == post_id).order_by(Comment.created_at.asc()).all()
+```
+
+#### backend/routes/media.py
+```python
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from models import Media, User, Post, Story
+from schemas import MediaCreate
+from database import get_db
+from .users import get_current_user
+from celery import Celery
+import boto3
+import os
+from uuid import uuid4
+from fastapi_limiter.depends import RateLimiter
+
+router = APIRouter()
+app = Celery("tasks", broker=os.getenv("REDIS_URL"))
+
+def get_s3_client():
+    return boto3.client(
+        "s3",
+        endpoint_url=os.getenv("MINIO_ENDPOINT"),
+        aws_access_key_id=os.getenv("MINIO_ACCESS_KEY"),
+        aws_secret_access_key=os.getenv("MINIO_SECRET_KEY")
+    )
+
+@router.post("/sign", dependencies=[Depends(RateLimiter(times=10, seconds=60))])
+async def sign_upload(media_type: str, current_user: User = Depends(get_current_user)):
+    s3_client = get_s3_client()
+    bucket = os.getenv("MINIO_BUCKET")
+    file_key = f"{current_user.id}/{uuid4()}.{media_type.split('/')[1]}"
+    presigned_url = s3_client.generate_presigned_url(
+        "put_object",
+        Params={"Bucket": bucket, "Key": file_key},
+        ExpiresIn=3600
+    )
+    return {"url": presigned_url, "file_key": file_key}
+
+@router.post("/", response_model=MediaCreate, dependencies=[Depends(RateLimiter(times=10, seconds=60))])
+async def create_media(media: MediaCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    db_media = Media(
+        owner_id=current_user.id,
+        file_key=media.file_key,
+        media_type=media.media_type,
+        width=media.width,
+        height=media.height,
+        mime=media.mime,
+        duration=media.duration
+    )
+    db.add(db_media)
+    db.commit()
+    db.refresh(db_media)
+    app.send_task("tasks.process_media", args=[str(db_media.id), media.file_key])
+    return media
+```
+
+#### backend/routes/messages.py
+```python
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from models import Message, User, Conversation
+from schemas import MessageCreate, MessageOut, ConversationCreate
+from database import get_db
+from .users import get_current_user
+from redis import Redis
+from fastapi_limiter.depends import RateLimiter
+import os
+import json
+from uuid import uuid4
+
+router = APIRouter()
+
+def get_redis():
+    return Redis.from_url(os.getenv("REDIS_URL"))
+
+@router.post("/conversations", response_model=MessageOut, dependencies=[Depends(RateLimiter(times=5, seconds=60))])
+async def create_conversation(conv: ConversationCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    db_conv = Conversation(is_group=conv.is_group, title=conv.title)
+    db.add(db_conv)
+    db.commit()
+    db.refresh(db_conv)
+    for user_id in conv.participant_ids:
+        if not db.query(User).filter(User.id == user_id).first():
+            raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+        db.add(Conversation(id=uuid4(), is_group=False, title=None))  # Add participants
+    db.commit()
+    return db_conv
+
+@router.post("/", response_model=MessageOut, dependencies=[Depends(RateLimiter(times=10, seconds=60))])
+async def send_message(message: MessageCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    conversation = db.query(Conversation).filter(Conversation.id == message.conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    db_message = Message(
+        conversation_id=message.conversation_id,
+        sender_id=current_user.id,
+        content=message.content,
+        read_by=[current_user.id]
+    )
+    db.add(db_message)
+    conversation.last_message_at = func.now()
+    db.commit()
+    db.refresh(db_message)
+    
+    redis = get_redis()
+    redis.publish(
+        f"conversation:{message.conversation_id}",
+        json.dumps({
+            "type": "message",
+            "message": {
+                "id": str(db_message.id),
+                "sender_id": str(db_message.sender_id),
+                "content": db_message.content,
+                "created_at": db_message.created_at.isoformat(),
+                "read_by": db_message.read_by
+            }
+        })
+    )
+    return db_message
+
+@router.get("/{conversation_id}", response_model=list[MessageOut], dependencies=[Depends(RateLimiter(times=10, seconds=60))])
+async def get_messages(conversation_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    messages = db.query(Message).filter(Message.conversation_id == conversation_id).order_by(Message.created_at.asc()).all()
+    for message in messages:
+        if current_user.id not in message.read_by:
+            message.read_by.append(current_user.id)
+    db.commit()
+    return messages
+```
+
+#### backend/routes/notifications.py
+```python
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from models import Notification, User
+from schemas import NotificationOut
+from database import get_db
+from .users import get_current_user
+from fastapi_limiter.depends import RateLimiter
+
+router = APIRouter()
+
+@router.get("/", response_model=list[NotificationOut], dependencies=[Depends(RateLimiter(times=10, seconds=60))])
+async def get_notifications(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return db.query(Notification).filter(Notification.user_id == current_user.id).order_by(Notification.created_at.desc()).limit(20).all()
+
+@router.post("/{notification_id}/read", dependencies=[Depends(RateLimiter(times=10, seconds=60))])
+async def mark_notification_read(notification_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    notification = db.query(Notification).filter(Notification.id == notification_id, Notification.user_id == current_user.id).first()
+    if not notification:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    notification.read = True
+    db.commit()
+    return {"message": "Notification marked as read"}
+```
+
+#### backend/routes/stories.py
+```python
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from sqlalchemy.sql import func
+from models import Story, User, Media, Notification, Follow
+from schemas import StoryCreate, StoryOut
+from database import get_db
+from .users import get_current_user
+from celery import Celery
+from fastapi_limiter.depends import RateLimiter
+from datetime import timedelta
+import os
+
+router = APIRouter()
+app = Celery("tasks", broker=os.getenv("REDIS_URL"))
+
+@router.post("/", response_model=StoryOut, dependencies=[Depends(RateLimiter(times=5, seconds=60))])
+async def create_story(story: StoryCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    db_media = Media(
+        owner_id=current_user.id,
+        file_key=story.media["file_key"],
+        media_type=story.media["media_type"],
+        width=story.media.get("width"),
+        height=story.media.get("height"),
+        mime=story.media.get("mime"),
+        duration=story.media.get("duration")
+    )
+    db.add(db_media)
+    db.commit()
+    db.refresh(db_media)
+    
+    db_story = Story(
+        user_id=current_user.id,
+        expires_at=func.now() + timedelta(hours=24)
+    )
+    db_media.story_id = db_story.id
+    db.add(db_story)
+    db.commit()
+    db.refresh(db_story)
+    
+    app.send_task("tasks.delete_expired_stories")
+    return db_story
+
+@router.get("/feed", response_model=list[StoryOut], dependencies=[Depends(RateLimiter(times=10, seconds=60))])
+async def get_stories(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    follows = db.query(Follow).filter(Follow.follower_id == current_user.id, Follow.approved == True).all()
+    followee_ids = [f.followee_id for f in follows] + [current_user.id]
+    stories = db.query(Story).filter(
+        Story.user_id.in_(followee_ids),
+        Story.expires_at > func.now()
+    ).order_by(Story.created_at.desc()).limit(20).all()
+    return stories
+```
+
+#### backend/routes/follows.py
+```python
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from models import Follow, User, Notification
+from schemas import FollowCreate
+from database import get_db
+from .users import get_current_user
+from redis import Redis
+from fastapi_limiter.depends import RateLimiter
+import os
+import json
+
+router = APIRouter()
+
+def get_redis():
+    return Redis.from_url(os.getenv("REDIS_URL"))
+
+@router.post("/", dependencies=[Depends(RateLimiter(times=10, seconds=60))])
+async def follow_user(follow: FollowCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    followee = db.query(User).filter(User.id == follow.followee_id).first()
+    if not followee:
+        raise HTTPException(status_code=404, detail="User not found")
+    if followee.id == current_user.id:
+        raise HTTPException(status_code=400, detail="Cannot follow yourself")
+    
+    existing_follow = db.query(Follow).filter(
+        Follow.follower_id == current_user.id,
+        Follow.followee_id == follow.followee_id
+    ).first()
+    if existing_follow:
+        raise HTTPException(status_code=400, detail="Already following")
+    
+    approved = not followee.is_private
+    db_follow = Follow(follower_id=current_user.id, followee_id=follow.followee_id, approved=approved)
+    db.add(db_follow)
+    
+    if approved:
+        notification = Notification(
+            user_id=follow.followee_id,
+            actor_id=current_user.id,
+            type="follow",
+            target_id=follow.followee_id
+        )
+        db.add(notification)
+        redis = get_redis()
+        redis.publish(
+            f"notifications:{follow.followee_id}",
+            json.dumps({"type": "follow", "actor_id": str(current_user.id)})
+        )
+    
+    db.commit()
+    return {"message": "Follow request sent" if not approved else "Followed"}
+
+@router.post("/{followee_id}/approve", dependencies=[Depends(RateLimiter(times=5, seconds=60))])
+async def approve_follow(followee_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    follow = db.query(Follow).filter(
+        Follow.follower_id == followee_id,
+        Follow.followee_id == current_user.id,
+        Follow.approved == False
+    ).first()
+    if not follow:
+        raise HTTPException(status_code=404, detail="Follow request not found")
+    follow.approved = True
+    notification = Notification(
+        user_id=followee_id,
+        actor_id=current_user.id,
+        type="follow_approved",
+        target_id=current_user.id
+    )
+    db.add(notification)
+    redis = get_redis()
+    redis.publish(
+        f"notifications:{followee_id}",
+        json.dumps({"type": "follow_approved", "actor_id": str(current_user.id)})
+    )
+    db.commit()
+    return {"message": "Follow request approved"}
+```
+
+#### backend/routes/search.py
+```python
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from sqlalchemy.sql import func
+from models import User, Post
+from schemas import UserOut, PostOut
+from database import get_db
+from .users import get_current_user
+from fastapi_limiter.depends import RateLimiter
+
+router = APIRouter()
+
+@router.get("/users", response_model=list[UserOut], dependencies=[Depends(RateLimiter(times=10, seconds=60))])
+async def search_users(query: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    users = db.query(User).filter(
+        User.search_vector.op('@@')(func.to_tsquery('english', query + ':*'))
+    ).limit(10).all()
+    results = []
+    for user in users:
+        follower_count = db.query(Follow).filter(Follow.followee_id == user.id, Follow.approved == True).count()
+        following_count = db.query(Follow).filter(Follow.follower_id == user.id, Follow.approved == True).count()
+        results.append({**user.__dict__, "follower_count": follower_count, "following_count": following_count})
+    return results
+
+@router.get("/hashtags", response_model=list[PostOut], dependencies=[Depends(RateLimiter(times=10, seconds=60))])
+async def search_hashtags(query: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    posts = db.query(Post).filter(
+        Post.search_vector.op('@@')(func.to_tsquery('english', query + ':*')),
+        Post.is_archived == False
+    ).limit(20).all()
+    return [p for p in posts if p.privacy == "public" or p.user_id == current_user.id or db.query(Follow).filter(Follow.follower_id == current_user.id, Follow.followee_id == p.user_id, Follow.approved == True).first()]
+```
+
+#### backend/routes/moderation.py
+```python
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from models import Report, User, Post
+from schemas import ReportCreate
+from database import get_db
+from .users import get_current_user
+from fastapi_limiter.depends import RateLimiter
+
+router = APIRouter()
+
+@router.post("/report", dependencies=[Depends(RateLimiter(times=5, seconds=60))])
+async def report_content(report: ReportCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if report.target_type not in ["post", "comment", "user"]:
+        raise HTTPException(status_code=400, detail="Invalid target type")
+    db_report = Report(
+        reporter_id=current_user.id,
+        target_id=report.target_id,
+        target_type=report.target_type,
+        reason=report.reason
+    )
+    db.add(db_report)
+    db.commit()
+    return {"message": "Report submitted"}
+
+@router.get("/reports", dependencies=[Depends(RateLimiter(times=5, seconds=60))])
+async def get_reports(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not current_user.verified:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    return db.query(Report).order_by(Report.created_at.desc()).limit(50).all()
+
+@router.post("/reports/{report_id}/resolve", dependencies=[Depends(RateLimiter(times=5, seconds=60))])
+async def resolve_report(report_id: str, status: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not current_user.verified:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    report = db.query(Report).filter(Report.id == report_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    report.status = status
+    if status == "resolved_ban" and report.target_type == "post":
+        post = db.query(Post).filter(Post.id == report.target_id).first()
+        if post:
+            post.is_archived = True
+    db.commit()
+    return {"message": "Report resolved"}
+```
+
+#### backend/routes/analytics.py
+```python
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from sqlalchemy.sql import func
+from models import AnalyticsEvent, Post
+from database import get_db
+from .users import get_current_user
+from fastapi_limiter.depends import RateLimiter
+
+router = APIRouter()
+
+@router.get("/post/{post_id}", dependencies=[Depends(RateLimiter(times=5, seconds=60))])
+async def get_post_analytics(post_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    post = db.query(Post).filter(Post.id == post_id, Post.user_id == current_user.id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found or not authorized")
+    views = db.query(AnalyticsEvent).filter(
+        AnalyticsEvent.target_id == post_id,
+        AnalyticsEvent.target_type == "post",
+        AnalyticsEvent.event_type == "view"
+    ).count()
+    likes = db.query(AnalyticsEvent).filter(
+        AnalyticsEvent.target_id == post_id,
+        AnalyticsEvent.target_type == "post",
+        AnalyticsEvent.event_type == "like"
+    ).count()
+    comments = db.query(AnalyticsEvent).filter(
+        AnalyticsEvent.target_id == post_id,
+        AnalyticsEvent.target_type == "post",
+        AnalyticsEvent.event_type == "comment"
+    ).count()
+    return {"post_id": post_id, "views": views, "likes": likes, "comments": comments}
+```
+
+#### backend/websocket.py
+```python
+from fastapi import APIRouter, WebSocket, Depends, HTTPException
+from sqlalchemy.orm import Session
+from models import User, Conversation
+from database import get_db
+from .users import get_current_user
+from redis import Redis
+import os
+import json
+import asyncio
+from fastapi_limiter.depends import RateLimiter
+from jose import jwt
+
+router = APIRouter()
+
+def get_redis():
+    return Redis.from_url(os.getenv("REDIS_URL"))
+
+async def subscribe_to_conversation(websocket: WebSocket, conversation_id: str, user_id: str):
+    redis = get_redis()
+    pubsub = redis.pubsub()
+    pubsub.subscribe(f"conversation:{conversation_id}", f"notifications:{user_id}")
+    
+    try:
+        while True:
+            message = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+            if message:
+                await websocket.send_text(message['data'].decode('utf-8'))
+            await asyncio.sleep(0.1)
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+    finally:
+        pubsub.unsubscribe()
+        redis.close()
+
+@router.websocket("/{conversation_id}", dependencies=[Depends(RateLimiter(times=5, seconds=60))])
+async def websocket_endpoint(websocket: WebSocket, conversation_id: str, token: str, db: Session = Depends(get_db)):
+    await websocket.accept()
+    
+    try:
+        payload = jwt.decode(token, os.getenv("JWT_SECRET", "your-secret-key"), algorithms=["HS256"])
+        user_id = payload.get("sub")
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            await websocket.close(code=1008, reason="Invalid token")
+            return
+    except JWTError:
+        await websocket.close(code=1008, reason="Invalid token")
+        return
+
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        await websocket.close(code=1008, reason="Conversation not found")
+        return
+
+    redis = get_redis()
+    redis.setex(f"presence:{conversation_id}:{user_id}", 30, "online")
+    redis.publish(
+        f"conversation:{conversation_id}",
+        json.dumps({"type": "presence", "user_id": user_id, "status": "online"})
+    )
+    
+    try:
+        asyncio.create_task(subscribe_to_conversation(websocket, conversation_id, user_id))
+        while True:
+            data = await websocket.receive_text()
+            payload = json.loads(data)
+            if payload.get("type") == "typing":
+                redis.publish(
+                    f"conversation:{conversation_id}",
+                    json.dumps({"type": "typing", "user_id": user_id})
+                )
+            elif payload.get("type") == "read":
+                message = db.query(Message).filter(Message.id == payload.get("message_id")).first()
+                if message and user_id not in message.read_by:
+                    message.read_by.append(user_id)
+                    db.commit()
+                    redis.publish(
+                        f"conversation:{conversation_id}",
+                        json.dumps({"type": "read", "message_id": payload.get("message_id"), "user_id": user_id})
+                    )
+    except Exception as e:
+        print(f"WebSocket closed: {e}")
+    finally:
+        redis.delete(f"presence:{conversation_id}:{user_id}")
+        redis.publish(
+            f"conversation:{conversation_id}",
+            json.dumps({"type": "presence", "user_id": user_id, "status": "offline"})
+        )
+        await websocket.close()
+        redis.close()
+```
+
+#### backend/tasks.py
+```python
+from celery import Celery
+from sqlalchemy.orm import Session
+from models import Media, Story
+from database import SessionLocal
+import subprocess
+import os
+from datetime import datetime
+
+app = Celery("tasks", broker=os.getenv("REDIS_URL"))
+
+@app.task
+def process_media(media_id: str, file_key: str):
+    db = SessionLocal()
+    try:
+        media = db.query(Media).filter(Media.id == media_id).first()
+        if not media:
+            return
+        output_key = f"thumbnails/{file_key.split('/')[-1].split('.')[0]}_thumb.jpg"
+        cmd = [
+            "ffmpeg", "-i", f"/minio/{file_key}", "-vf", "scale=200:200",
+            "-vframes", "1" if media.media_type.startswith("image") else "10",
+            f"/minio/{output_key}"
+        ]
+        subprocess.run(cmd, check=True)
+        media.variant = {"thumbnail": output_key}
+        db.commit()
+    finally:
+        db.close()
+
+@app.task
+def delete_expired_stories():
+    db = SessionLocal()
+    try:
+        expired_stories = db.query(Story).filter(Story.expires_at < datetime.utcnow()).all()
+        for story in expired_stories:
+            media = db.query(Media).filter(Media.story_id == story.id).all()
+            for m in media:
+                db.delete(m)
+            db.delete(story)
+        db.commit()
+    finally:
+        db.close()
+```
+
+#### backend/tests/test_auth.py
+```python
+import pytest
+from fastapi.testclient import TestClient
+from main import app
+from database import SessionLocal
+
+client = TestClient(app)
+
+@pytest.fixture
+def db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def test_register_user():
+    response = client.post("/api/auth/register", json={"username": "testuser", "email": "test@example.com", "password": "Test1234!"})
+    assert response.status_code == 200
+    assert response.json()["username"] == "testuser"
+
+def test_login_user():
+    client.post("/api/auth/register", json={"username": "testuser2", "email": "test2@example.com", "password": "Test1234!"})
+    response = client.post("/api/auth/login", data={"username": "testuser2", "password": "Test1234!"})
+    assert response.status_code == 200
+    assert "access_token" in response.json()
+```
+
+#### backend/tests/test_posts.py
+```python
+import pytest
+from fastapi.testclient import TestClient
+from main import app
+
+client = TestClient(app)
+
+@pytest.fixture
+def token():
+    client.post("/api/auth/register", json={"username": "testuser3", "email": "test3@example.com", "password": "Test1234!"})
+    response = client.post("/api/auth/login", data={"username": "testuser3", "password": "Test1234!"})
+    return response.json()["access_token"]
+
+def test_create_post(token):
+    response = client.post(
+        "/api/posts",
+        json={"caption": "Test post", "hashtags": ["test"], "privacy": "public"},
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 200
+    assert response.json()["caption"] == "Test post"
+```
+
+#### backend/tests/test_messages.py
+```python
+import pytest
+from fastapi.testclient import TestClient
+from main import app
+from database import SessionLocal
+from models import Conversation
+from uuid import uuid4
+
+client = TestClient(app)
+
+@pytest.fixture
+def db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+@pytest.fixture
+def token():
+    client.post("/api/auth/register", json={"username": "testuser4", "email": "test4@example.com", "password": "Test1234!"})
+    response = client.post("/api/auth/login", data={"username": "testuser4", "password": "Test1234!"})
+    return response.json()["access_token"]
+
+def test_send_message(token, db):
+    conv = Conversation(id=uuid4(), is_group=False)
+    db.add(conv)
+    db.commit()
+    response = client.post(
+        "/api/messages",
+        json={"content": "Hello", "conversation_id": str(conv.id)},
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 200
+    assert response.json()["content"] == "Hello"
+```
+
+#### backend/migrations/001_initial_schema.sql
+```sql
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";
+
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username VARCHAR(30) UNIQUE NOT NULL,
+    email VARCHAR(320) UNIQUE,
+    password_hash TEXT NOT NULL,
+    display_name VARCHAR(100),
+    bio TEXT,
+    avatar_url TEXT,
+    verified BOOLEAN DEFAULT FALSE,
+    joined_at TIMESTAMPTZ DEFAULT NOW(),
+    is_active BOOLEAN DEFAULT TRUE,
+    is_private BOOLEAN DEFAULT FALSE,
+    last_seen TIMESTAMPTZ,
+    is_online BOOLEAN DEFAULT FALSE,
+    settings JSONB DEFAULT '{}'::JSONB,
+    search_vector TSVECTOR
+);
+CREATE INDEX idx_users_username ON users (LOWER(username));
+CREATE INDEX idx_users_search ON users USING GIN (search_vector);
+
+CREATE TABLE posts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    caption TEXT,
+    hashtags JSONB DEFAULT '[]'::JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ,
+    privacy VARCHAR(20) DEFAULT 'public',
+    location JSONB,
+    like_count INTEGER DEFAULT 0,
+    comment_count INTEGER DEFAULT 0,
+    view_count BIGINT DEFAULT 0,
+    is_archived BOOLEAN DEFAULT FALSE,
+    allow_comments BOOLEAN DEFAULT TRUE,
+    hide_like_counts BOOLEAN DEFAULT FALSE,
+    search_vector TSVECTOR
+);
+CREATE INDEX idx_posts_user_created ON posts (user_id, created_at DESC);
+CREATE INDEX idx_posts_search ON posts USING GIN (search_vector);
+
+CREATE TABLE media (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    post_id UUID REFERENCES posts(id) ON DELETE CASCADE,
+    story_id UUID REFERENCES stories(id) ON DELETE CASCADE,
+    owner_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    media_type VARCHAR(20),
+    file_key TEXT,
+    width INTEGER,
+    height INTEGER,
+    duration INTEGER,
+    mime TEXT,
+    variant JSONB,
+    uploaded_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_media_post ON media (post_id);
+CREATE INDEX idx_media_story ON media (story_id);
+
+CREATE TABLE conversations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    is_group BOOLEAN DEFAULT FALSE,
+    title TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    last_message_at TIMESTAMPTZ
+);
+
+CREATE TABLE messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
+    sender_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    content TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    read_by JSONB DEFAULT '[]'::JSONB
+);
+```
+
+#### backend/migrations/002_add_likes_comments_notifications.sql
+```sql
+CREATE TABLE likes (
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    post_id UUID REFERENCES posts(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (user_id, post_id)
+);
+CREATE INDEX idx_likes_post ON likes (post_id);
+
+CREATE TABLE comments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    post_id UUID REFERENCES posts(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    parent_comment_id UUID REFERENCES comments(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    edited_at TIMESTAMPTZ
+);
+CREATE INDEX idx_comments_post ON comments (post_id, created_at);
+
+CREATE TABLE notifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    actor_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    type VARCHAR(50) NOT NULL,
+    target_id UUID,
+    read BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_notifications_user ON notifications (user_id, created_at DESC);
+```
+
+#### backend/migrations/003_add_websocket_metadata.sql
+```sql
+ALTER TABLE conversations ADD COLUMN last_message_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN is_online BOOLEAN DEFAULT FALSE;
+```
+
+#### backend/migrations/004_add_stories_follows_analytics.sql
+```sql
+CREATE TABLE stories (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    expires_at TIMESTAMPTZ
+);
+CREATE INDEX idx_stories_user ON stories (user_id, created_at DESC);
+
+CREATE TABLE follows (
+    follower_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    followee_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    approved BOOLEAN DEFAULT TRUE,
+    PRIMARY KEY (follower_id, followee_id)
+);
+CREATE INDEX idx_follows_followee ON follows (followee_id);
+
+CREATE TABLE reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    reporter_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    target_id UUID,
+    target_type VARCHAR(20) NOT NULL,
+    reason TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    status VARCHAR(20) DEFAULT 'pending'
+);
+
+CREATE TABLE analytics_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    target_id UUID,
+    target_type VARCHAR(20),
+    event_type VARCHAR(50) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_analytics_target ON analytics_events (target_id, target_type);
+```
+
+### Frontend Files
+
+#### frontend/Dockerfile
+```dockerfile
+FROM node:20
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm install
+COPY . .
+CMD ["npm", "run", "dev"]
+```
+
+#### frontend/package.json
+```json
+{
+  "name": "social-network-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test": "jest"
+  },
+  "dependencies": {
+    "next": "14.2.15",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "@tanstack/react-query": "^5.59.15",
+    "axios": "^1.7.7",
+    "tailwindcss": "^3.4.14",
+    "swr": "^2.2.5",
+    "ws": "^8.18.0",
+    "framer-motion": "^11.11.9"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "@types/node": "^20.16.11",
+    "@types/react": "^18.3.11",
+    "@types/ws": "^8.5.12",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "14.2.15",
+    "postcss": "^8.4.47",
+    "autoprefixer": "^10.4.20",
+    "jest": "^29.7.0",
+    "@testing-library/react": "^16.0.1",
+    "@testing-library/jest-dom": "^6.6.2"
+  }
+}
+```
+
+#### frontend/tailwind.config.js
+```javascript
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: [
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {
+      keyframes: {
+        fadeIn: {
+          '0%': { opacity: 0 },
+          '100%': { opacity: 1 }
+        },
+        slideIn: {
+          '0%': { transform: 'translateY(20px)', opacity: 0 },
+          '100%': { transform: 'translateY(0)', opacity: 1 }
+        }
+      },
+      animation: {
+        fadeIn: 'fadeIn 0.5s ease-in-out',
+        slideIn: 'slideIn 0.5s ease-in-out'
+      }
+    }
+  },
+  plugins: []
+}
+```
+
+#### frontend/src/styles/globals.css
+```css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+}
+
+.story-container {
+  display: flex;
+  overflow-x: auto;
+  padding: 1rem;
+  gap: 1rem;
+}
+
+.story-container::-webkit-scrollbar {
+  display: none;
+}
+```
+
+#### frontend/src/pages/index.tsx
+```tsx
+import { useRouter } from 'next/router';
+import NavBar from '../components/NavBar';
+import { useQuery } from '@tanstack/react-query';
+import axios from 'axios';
+import PostCard from '../components/PostCard';
+import StoryCard from '../components/StoryCard';
+import { motion } from 'framer-motion';
+
+export default function Home() {
+  const router = useRouter();
+  const { data: posts, isLoading: postsLoading } = useQuery({
+    queryKey: ['posts'],
+    queryFn: async () => {
+      const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/api/posts/feed`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      return res.data;
+    }
+  });
+
+  const { data: stories, isLoading: storiesLoading } = useQuery({
+    queryKey: ['stories'],
+    queryFn: async () => {
+      const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/api/stories/feed`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      return res.data;
+    }
+  });
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="min-h-screen bg-gray-100"
+    >
+      <NavBar />
+      <main className="container mx-auto p-4">
+        <div className="story-container">
+          {storiesLoading ? (
+            <p>Loading stories...</p>
+          ) : (
+            stories?.map((story: any) => (
+              <StoryCard key={story.id} story={story} />
+            ))
+          )}
+        </div>
+        <h1 className="text-2xl font-bold mb-4">Home Feed</h1>
+        {postsLoading ? (
+          <p>Loading...</p>
+        ) : (
+          <div className="space-y-4">
+            {posts?.map((post: any) => (
+              <PostCard key={post.id} post={post} />
+            ))}
+          </div>
+        )}
+      </main>
+    </motion.div>
+  );
+}
+```
+
+#### frontend/src/pages/login.tsx
+```tsx
+import { useState } from 'react';
+import { useRouter } from 'next/router';
+import axios from 'axios';
+import { motion } from 'framer-motion';
+
+export default function Login() {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const router = useRouter();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/login`, {
+        username,
+        password
+      });
+      localStorage.setItem('token', res.data.access_token);
+      localStorage.setItem('user_id', res.data.user_id);
+      router.push('/');
+    } catch (error) {
+      alert('Login failed: Invalid credentials');
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="min-h-screen bg-gray-100 flex items-center justify-center"
+    >
+      <form onSubmit={handleSubmit} className="bg-white p-6 rounded shadow-md w-full max-w-md">
+        <h2 className="text-2xl mb-4">Login</h2>
+        <input
+          type="text"
+          placeholder="Username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          className="w-full p-2 mb-4 border rounded"
+        />
+        <input
+          type="password"
+          placeholder="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className="w-full p-2 mb-4 border rounded"
+        />
+        <button type="submit" className="w-full p-2 bg-blue-500 text-white rounded">
+          Login
+        </button>
+        <p className="mt-2 text-center">
+          Don't have an account?{' '}
+          <a href="/register" className="text-blue-500">Register</a>
+        </p>
+      </form>
+    </motion.div>
+  );
+}
+```
+
+#### frontend/src/pages/register.tsx
+```tsx
+import { useState } from 'react';
+import { useRouter } from 'next/router';
+import axios from 'axios';
+import { motion } from 'framer-motion';
+
+export default function Register() {
+  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const router = useRouter();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/register`, {
+        username,
+        email,
+        password
+      });
+      router.push('/login');
+    } catch (error) {
+      alert('Registration failed: Username or email taken');
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="min-h-screen bg-gray-100 flex items-center justify-center"
+    >
+      <form onSubmit={handleSubmit} className="bg-white p-6 rounded shadow-md w-full max-w-md">
+        <h2 className="text-2xl mb-4">Register</h2>
+        <input
+          type="text"
+          placeholder="Username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          className="w-full p-2 mb-4 border rounded"
+        />
+        <input
+          type="email"
+          placeholder="Email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="w-full p-2 mb-4 border rounded"
+        />
+        <input
+          type="password"
+          placeholder="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className="w-full p-2 mb-4 border rounded"
+        />
+        <button type="submit" className="w-full p-2 bg-blue-500 text-white rounded">
+          Register
+        </button>
+        <p className="mt-2 text-center">
+          Already have an account?{' '}
+          <a href="/login" className="text-blue-500">Login</a>
+        </p>
+      </form>
+    </motion.div>
+  );
+}
+```
+
+
+#### frontend/src/pages/profile/[id].tsx (Completed)
+```tsx
+import { useRouter } from 'next/router';
+import { useQuery } from '@tanstack/react-query';
+import axios from 'axios';
+import NavBar from '../../components/NavBar';
+import PostCard from '../../components/PostCard';
+import AnalyticsDashboard from '../../components/AnalyticsDashboard';
+import { motion } from 'framer-motion';
+
+export default function Profile() {
+  const router = useRouter();
+  const { id } = router.query;
+
+  const { data: user, isLoading: userLoading } = useQuery({
+    queryKey: ['user', id],
+    queryFn: async () => {
+      const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/api/users/${id}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      return res.data;
+    },
+    enabled: !!id
+  });
+
+  const { data: posts, isLoading: postsLoading } = useQuery({
+    queryKey: ['userPosts', id],
+    queryFn: async () => {
+      const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/api/posts?user_id=${id}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      return res.data;
+    },
+    enabled: !!id
+  });
+
+  const handleFollow = async () => {
+    try {
+      await axios.post(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/follows`,
+        { followee_id: id },
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      alert('Follow request sent');
+    } catch (error) {
+      alert('Failed to follow');
+    }
+  };
+
+  const handleEditProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const data = {
+      display_name: form.display_name.value,
+      bio: form.bio.value,
+      is_private: form.is_private.checked
+    };
+    try {
+      await axios.patch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/users/me`,
+        data,
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      router.reload();
+    } catch (error) {
+      alert('Failed to update profile');
+    }
+  };
+
+  if (userLoading) return <p>Loading...</p>;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="min-h-screen bg-gray-100"
+    >
+      <NavBar />
+      <main className="container mx-auto p-4">
+        <div className="bg-white p-6 rounded shadow-md mb-4">
+          <img
+            src={user?.avatar_url || '/default-avatar.png'}
+            alt="Avatar"
+            className="w-24 h-24 rounded-full mx-auto mb-4"
+          />
+          <h2 className="text-xl font-bold text-center">{user?.display_name || user?.username}</h2>
+          <p className="text-center">{user?.bio}</p>
+          <div className="flex justify-center space-x-4 mt-2">
+            <p>{user?.follower_count} Followers</p>
+            <p>{user?.following_count} Following</p>
+          </div>
+          {user?.id === localStorage.getItem('user_id') ? (
+            <form onSubmit={handleEditProfile} className="mt-4">
+              <input
+                name="display_name"
+                placeholder="Display Name"
+                defaultValue={user?.display_name}
+                className="w-full p-2 mb-2 border rounded"
+              />
+              <textarea
+                name="bio"
+                placeholder="Bio"
+                defaultValue={user?.bio}
+                className="w-full p-2 mb-2 border rounded"
+              />
+              <label className="flex items-center">
+                <input type="checkbox" name="is_private" defaultChecked={user?.is_private} />
+                <span className="ml-2">Private Account</span>
+              </label>
+              <button type="submit" className="w-full p-2 bg-blue-500 text-white rounded mt-2">
+                Update Profile
+              </button>
+            </form>
+          ) : (
+            <button onClick={handleFollow} className="w-full p-2 bg-blue-500 text-white rounded mt-4">
+              Follow
+            </button>
+          )}
+        </div>
+        <h3 className="text-xl font-bold mb-4">Posts</h3>
+        {postsLoading ? (
+          <p>Loading posts...</p>
+        ) : (
+          <div className="space-y-4">
+            {posts?.map((post: any) => (
+              <div key={post.id}>
+                <PostCard post={post} />
+                {user?.id === localStorage.getItem('user_id') && (
+                  <AnalyticsDashboard postId={post.id} />
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
+    </motion.div>
+  );
+}
+```
+
+#### frontend/src/pages/post/create.tsx
+```tsx
+import { useState } from 'react';
+import { useRouter } from 'next/router';
+import axios from 'axios';
+import NavBar from '../../components/NavBar';
+import { motion } from 'framer-motion';
+
+export default function CreatePost() {
+  const [caption, setCaption] = useState('');
+  const [hashtags, setHashtags] = useState('');
+  const [privacy, setPrivacy] = useState('public');
+  const [files, setFiles] = useState<File[]>([]);
+  const router = useRouter();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const media = [];
+      for (const file of files) {
+        const { data } = await axios.post(
+          `${process.env.NEXT_PUBLIC_API_URL}/api/media/sign`,
+          { media_type: file.type },
+          { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+        );
+        await axios.put(data.url, file, {
+          headers: { 'Content-Type': file.type }
+        });
+        const mediaRes = await axios.post(
+          `${process.env.NEXT_PUBLIC_API_URL}/api/media`,
+          { file_key: data.file_key, media_type: file.type },
+          { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+        );
+        media.push(mediaRes.data);
+      }
+      await axios.post(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/posts`,
+        { caption, hashtags: hashtags.split(' ').map((tag) => tag.replace('#', '')), privacy, media },
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      router.push('/');
+    } catch (error) {
+      alert('Failed to create post');
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="min-h-screen bg-gray-100"
+    >
+      <NavBar />
+      <main className="container mx-auto p-4">
+        <form onSubmit={handleSubmit} className="bg-white p-6 rounded shadow-md max-w-md mx-auto">
+          <h2 className="text-2xl mb-4">Create Post</h2>
+          <textarea
+            placeholder="Caption"
+            value={caption}
+            onChange={(e) => setCaption(e.target.value)}
+            className="w-full p-2 mb-4 border rounded"
+          />
+          <input
+            type="text"
+            placeholder="#hashtags"
+            value={hashtags}
+            onChange={(e) => setHashtags(e.target.value)}
+            className="w-full p-2 mb-4 border rounded"
+          />
+          <select
+            value={privacy}
+            onChange={(e) => setPrivacy(e.target.value)}
+            className="w-full p-2 mb-4 border rounded"
+          >
+            <option value="public">Public</option>
+            <option value="private">Private</option>
+          </select>
+          <input
+            type="file"
+            multiple
+            accept="image/*,video/*"
+            onChange={(e) => setFiles(Array.from(e.target.files || []))}
+            className="w-full p-2 mb-4"
+          />
+          <button type="submit" className="w-full p-2 bg-blue-500 text-white rounded">
+            Post
+          </button>
+        </form>
+      </main>
+    </motion.div>
+  );
+}
+```
+
+#### frontend/src/pages/post/[id].tsx
+```tsx
+import { useRouter } from 'next/router';
+import { useQuery } from '@tanstack/react-query';
+import axios from 'axios';
+import NavBar from '../../components/NavBar';
+import PostCard from '../../components/PostCard';
+import { motion } from 'framer-motion';
+
+export default function PostPage() {
+  const router = useRouter();
+  const { id } = router.query;
+
+  const { data: post, isLoading } = useQuery({
+    queryKey: ['post', id],
+    queryFn: async () => {
+      const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/api/posts/${id}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      return res.data;
+    },
+    enabled: !!id
+  });
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="min-h-screen bg-gray-100"
+    >
+      <NavBar />
+      <main className="container mx-auto p-4">
+        {isLoading ? (
+          <p>Loading...</p>
+        ) : (
+          <PostCard post={post} />
+        )}
+      </main>
+    </motion.div>
+  );
+}
+```
+
+#### frontend/src/pages/messages.tsx
+```tsx
+import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import axios from 'axios';
+import NavBar from '../components/NavBar';
+import MessageCard from '../components/MessageCard';
+import { connectWebSocket } from '../lib/websocket';
+import { motion } from 'framer-motion';
+
+export default function Messages() {
+  const [messages, setMessages] = useState<any[]>([]);
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const [conversationId, setConversationId] = useState<string>('');
+
+  const { data: conversations, isLoading } = useQuery({
+    queryKey: ['conversations'],
+    queryFn: async () => {
+      const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/api/messages`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      return res.data;
+    }
+  });
+
+  useEffect(() => {
+    if (conversationId) {
+      const ws = connectWebSocket(conversationId, (data) => {
+        if (data.type === 'message') {
+          setMessages((prev) => [...prev, data.message]);
+        } else if (data.type === 'typing') {
+          setTypingUsers((prev) => [...new Set([...prev, data.user_id])]);
+          setTimeout(() => {
+            setTypingUsers((prev) => prev.filter((id) => id !== data.user_id));
+          }, 2000);
+        } else if (data.type === 'read') {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === data.message_id ? { ...msg, read_by: [...msg.read_by, data.user_id] } : msg
+            )
+          );
+        }
+      });
+      return () => ws.close();
+    }
+  }, [conversationId]);
+
+  const handleSend = async (content: string) => {
+    try {
+      await axios.post(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/messages`,
+        { content, conversation_id: conversationId },
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+    } catch (error) {
+      alert('Failed to send message');
+    }
+  };
+
+  const handleTyping = () => {
+    const ws = new WebSocket(`${process.env.NEXT_PUBLIC_WS_URL}/${conversationId}?token=${localStorage.getItem('token')}`);
+    ws.send(JSON.stringify({ type: 'typing' }));
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="min-h-screen bg-gray-100"
+    >
+      <NavBar />
+      <main className="container mx-auto p-4">
+        <h2 className="text-2xl mb-4">Messages</h2>
+        <select
+          value={conversationId}
+          onChange={(e) => setConversationId(e.target.value)}
+          className="w-full p-2 mb-4 border rounded"
+        >
+          <option value="">Select a conversation</option>
+          {conversations?.map((conv: any) => (
+            <option key={conv.id} value={conv.id}>
+              {conv.title || conv.id}
+            </option>
+          ))}
+        </select>
+        <a href="/messages/new" className="text-blue-500 mb-4 block">New Conversation</a>
+        <div className="space-y-4">
+          {messages.map((msg) => (
+            <MessageCard key={msg.id} message={msg} />
+          ))}
+        </div>
+        {typingUsers.length > 0 && (
+          <p className="text-sm text-gray-500">{typingUsers.join(', ')} typing...</p>
+        )}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const content = (e.target as HTMLFormElement).content.value;
+            handleSend(content);
+            (e.target as HTMLFormElement).reset();
+          }}
+          className="mt-4"
+        >
+          <input
+            type="text"
+            name="content"
+            placeholder="Type a message"
+            onKeyDown={handleTyping}
+            className="w-full p-2 border rounded"
+          />
+          <button type="submit" className="w-full p-2 bg-blue-500 text-white rounded mt-2">
+            Send
+          </button>
+        </form>
+      </main>
+    </motion.div>
+  );
+}
+```
+
+#### frontend/src/pages/messages/new.tsx
+```tsx
+import { useState } from 'react';
+import { useRouter } from 'next/router';
+import axios from 'axios';
+import NavBar from '../../components/NavBar';
+import { motion } from 'framer-motion';
+
+export default function NewConversation() {
+  const [title, setTitle] = useState('');
+  const [participantIds, setParticipantIds] = useState('');
+  const router = useRouter();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await axios.post(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/messages/conversations`,
+        {
+          title,
+          is_group: participantIds.split(',').length > 1,
+          participant_ids: participantIds.split(',').map((id) => id.trim())
+        },
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      router.push('/messages');
+    } catch (error) {
+      alert('Failed to create conversation');
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="min-h-screen bg-gray-100"
+    >
+      <NavBar />
+      <main className="container mx-auto p-4">
+        <form onSubmit={handleSubmit} className="bg-white p-6 rounded shadow-md max-w-md mx-auto">
+          <h2 className="text-2xl mb-4">New Conversation</h2>
+          <input
+            type="text"
+            placeholder="Conversation Title (optional)"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            className="w-full p-2 mb-4 border rounded"
+          />
+          <input
+            type="text"
+            placeholder="Participant IDs (comma-separated)"
+            value={participantIds}
+            onChange={(e) => setParticipantIds(e.target.value)}
+            className="w-full p-2 mb-4 border rounded"
+          />
+          <button type="submit" className="w-full p-2 bg-blue-500 text-white rounded">
+            Create
+          </button>
+        </form>
+      </main>
+    </motion.div>
+  );
+}
+```
+
+#### frontend/src/pages/notifications.tsx
+```tsx
+import { useQuery } from '@tanstack/react-query';
+import axios from 'axios';
+import NavBar from '../components/NavBar';
+import { motion } from 'framer-motion';
+
+export default function Notifications() {
+  const { data: notifications, isLoading } = useQuery({
+    queryKey: ['notifications'],
+    queryFn: async () => {
+      const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/api/notifications`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      return res.data;
+    }
+  });
+
+  const markAsRead = async (notificationId: string) => {
+    try {
+      await axios.post(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/notifications/${notificationId}/read`,
+        {},
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+    } catch (error) {
+      alert('Failed to mark notification as read');
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="min-h-screen bg-gray-100"
+    >
+      <NavBar />
+      <main className="container mx-auto p-4">
+        <h2 className="text-2xl mb-4">Notifications</h2>
+        {isLoading ? (
+          <p>Loading...</p>
+        ) : (
+          <div className="space-y-4">
+            {notifications?.map((notif: any) => (
+              <div key={notif.id} className="bg-white p-4 rounded shadow-md flex justify-between">
+                <p>
+                  {notif.type === 'like' && `User ${notif.actor_id} liked your post.`}
+                  {notif.type === 'comment' && `User ${notif.actor_id} commented on your post.`}
+                  {notif.type === 'follow' && `User ${notif.actor_id} followed you.`}
+                  {notif.type === 'follow_approved' && `Your follow request was approved.`}
+                </p>
+                {!notif.read && (
+                  <button
+                    onClick={() => markAsRead(notif.id)}
+                    className="text-blue-500"
+                  >
+                    Mark as read
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
+    </motion.div>
+  );
+}
+```
+
+#### frontend/src/pages/stories.tsx
+```tsx
+import { useQuery } from '@tanstack/react-query';
+import axios from 'axios';
+import NavBar from '../components/NavBar';
+import StoryCard from '../components/StoryCard';
+import { motion } from 'framer-motion';
+
+export default function Stories() {
+  const { data: stories, isLoading } = useQuery({
+    queryKey: ['stories'],
+    queryFn: async () => {
+      const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/api/stories/feed`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      return res.data;
+    }
+  });
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="min-h-screen bg-gray-100"
+    >
+      <NavBar />
+      <main className="container mx-auto p-4">
+        <h2 className="text-2xl mb-4">Stories</h2>
+        <div className="story-container">
+          {isLoading ? (
+            <p>Loading stories...</p>
+          ) : (
+            stories?.map((story: any) => (
+              <StoryCard key={story.id} story={story} />
+            ))
+          )}
+        </div>
+      </main>
+    </motion.div>
+  );
+}
+```
+
+#### frontend/src/pages/search.tsx
+```tsx
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import axios from 'axios';
+import NavBar from '../components/NavBar';
+import PostCard from '../components/PostCard';
+import { motion } from 'framer-motion';
+
+export default function Search() {
+  const [query, setQuery] = useState('');
+  const [searchType, setSearchType] = useState('users');
+
+  const { data: results, isLoading } = useQuery({
+    queryKey: ['search', query, searchType],
+    queryFn: async () => {
+      if (!query) return [];
+      const res = await axios.get(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/search/${searchType}?query=${encodeURIComponent(query)}`,
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      return res.data;
+    },
+    enabled: !!query
+  });
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="min-h-screen bg-gray-100"
+    >
+      <NavBar />
+      <main className="container mx-auto p-4">
+        <h2 className="text-2xl mb-4">Search</h2>
+        <div className="flex mb-4">
+          <input
+            type="text"
+            placeholder="Search..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="w-full p-2 border rounded-l"
+          />
+          <select
+            value={searchType}
+            onChange={(e) => setSearchType(e.target.value)}
+            className="p-2 border rounded-r"
+          >
+            <option value="users">Users</option>
+            <option value="hashtags">Hashtags</option>
+          </select>
+        </div>
+        {isLoading ? (
+          <p>Loading...</p>
+        ) : (
+          <div className="space-y-4">
+            {searchType === 'users' ? (
+              results?.map((user: any) => (
+                <div key={user.id} className="bg-white p-4 rounded shadow-md">
+                  <a href={`/profile/${user.id}`} className="text-blue-500">
+                    {user.username}
+                  </a>
+                  <p>{user.display_name}</p>
+                </div>
+              ))
+            ) : (
+              results?.map((post: any) => (
+                <PostCard key={post.id} post={post} />
+              ))
+            )}
+          </div>
+        )}
+      </main>
+    </motion.div>
+  );
+}
+```
+
+#### frontend/src/pages/admin.tsx
+```tsx
+import { useQuery } from '@tanstack/react-query';
+import axios from 'axios';
+import NavBar from '../components/NavBar';
+import { motion } from 'framer-motion';
+
+export default function Admin() {
+  const { data: reports, isLoading } = useQuery({
+    queryKey: ['reports'],
+    queryFn: async () => {
+      const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/api/moderation/reports`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      return res.data;
+    }
+  });
+
+  const handleResolve = async (reportId: string, status: string) => {
+    try {
+      await axios.post(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/moderation/reports/${reportId}/resolve`,
+        { status },
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      alert('Report resolved');
+    } catch (error) {
+      alert('Failed to resolve report');
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="min-h-screen bg-gray-100"
+    >
+      <NavBar />
+      <main className="container mx-auto p-4">
+        <h2 className="text-2xl mb-4">Admin Dashboard</h2>
+        {isLoading ? (
+          <p>Loading...</p>
+        ) : (
+          <div className="space-y-4">
+            {reports?.map((report: any) => (
+              <div key={report.id} className="bg-white p-4 rounded shadow-md">
+                <p>Reported {report.target_type} ID: {report.target_id}</p>
+                <p>Reason: {report.reason}</p>
+                <p>Status: {report.status}</p>
+                {report.status === 'pending' && (
+                  <div className="flex space-x-2 mt-2">
+                    <button
+                      onClick={() => handleResolve(report.id, 'resolved_ok')}
+                      className="p-2 bg-green-500 text-white rounded"
+                    >
+                      Approve
+                    </button>
+                    <button
+                      onClick={() => handleResolve(report.id, 'resolved_ban')}
+                      className="p-2 bg-red-500 text-white rounded"
+                    >
+                      Ban
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
+    </motion.div>
+  );
+}
+```
+
+#### frontend/src/components/NavBar.tsx
+```tsx
+import { useRouter } from 'next/router';
+import { motion } from 'framer-motion';
+
+export default function NavBar() {
+  const router = useRouter();
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user_id');
+    router.push('/login');
+  };
+
+  return (
+    <motion.nav
+      initial={{ y: -50 }}
+      animate={{ y: 0 }}
+      className="bg-white p-4 shadow-md sticky top-0 z-10"
+    >
+      <div className="container mx-auto flex justify-between items-center">
+        <a href="/" className="text-xl font-bold">Social Network</a>
+        <div className="space-x-4">
+          <a href="/" className="text-blue-500">Home</a>
+          <a href="/search" className="text-blue-500">Search</a>
+          <a href="/post/create" className="text-blue-500">Create Post</a>
+          <a href="/stories" className="text-blue-500">Stories</a>
+          <a href="/messages" className="text-blue-500">Messages</a>
+          <a href="/notifications" className="text-blue-500">Notifications</a>
+          <a href="/admin" className="text-blue-500">Admin</a>
+          <a href={`/profile/${localStorage.getItem('user_id')}`} className="text-blue-500">Profile</a>
+          <button onClick={handleLogout} className="text-blue-500">Logout</button>
+        </div>
+      </div>
+    </motion.nav>
+  );
+}
+```
+
+#### frontend/src/components/PostCard.tsx
+```tsx
+import { useState } from 'react';
+import axios from 'axios';
+import { motion } from 'framer-motion';
+
+interface Post {
+  id: string;
+  user_id: string;
+  caption?: string;
+  hashtags: string[];
+  like_count: number;
+  comment_count: number;
+  media?: { file_key: string; media_type: string }[];
+}
+
+export default function PostCard({ post }: { post: Post }) {
+  const [content, setContent] = useState('');
+  const [comments, setComments] = useState<any[]>([]);
+  const [liked, setLiked] = useState(false);
+
+  const handleLike = async () => {
+    try {
+      const res = await axios.post(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/posts/${post.id}/like`,
+        {},
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      setLiked(res.data.liked);
+    } catch (error) {
+      alert('Failed to like post');
+    }
+  };
+
+  const handleComment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await axios.post(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/posts/${post.id}/comment`,
+        { content, post_id: post.id },
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      setContent('');
+      const res = await axios.get(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/posts/${post.id}/comments`,
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      setComments(res.data);
+    } catch (error) {
+      alert('Failed to comment');
+    }
+  };
+
+  const handleReport = async () => {
+    try {
+      await axios.post(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/moderation/report`,
+        { target_id: post.id, target_type: 'post', reason: 'Inappropriate content' },
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      alert('Post reported');
+    } catch (error) {
+      alert('Failed to report post');
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-white p-4 rounded shadow-md"
+    >
+      <a href={`/profile/${post.user_id}`} className="text-blue-500">
+        User: {post.user_id}
+      </a>
+      <p className="mt-2">{post.caption}</p>
+      <p className="text-sm text-gray-500">{post.hashtags.map((tag) => `#${tag}`).join(' ')}</p>
+      {post.media?.map((media, index) => (
+        <div key={index} className="mt-2">
+          {media.media_type.startsWith('image') ? (
+            <img src={media.file_key} alt="Post media" className="w-full rounded" />
+          ) : (
+            <video src={media.file_key} controls className="w-full rounded" />
+          )}
+        </div>
+      ))}
+      <div className="flex justify-between mt-2">
+        <button onClick={handleLike} className={`p-2 ${liked ? 'text-red-500' : 'text-gray-500'}`}>
+          {liked ? 'Unlike' : 'Like'} ({post.like_count})
+        </button>
+        <p>{post.comment_count} Comments</p>
+        <button onClick={handleReport} className="text-red-500">Report</button>
+      </div>
+      <form onSubmit={handleComment} className="mt-2">
+        <input
+          type="text"
+          placeholder="Add a comment"
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          className="w-full p-2 border rounded"
+        />
+        <button type="submit" className="p-2 bg-blue-500 text-white rounded mt-2">
+          Comment
+        </button>
+      </form>
+      <div className="mt-2">
+        {comments.map((comment) => (
+          <div key={comment.id} className="text-sm">
+            <a href={`/profile/${comment.user_id}`} className="text-blue-500">
+              {comment.user_id}
+            </a>: {comment.content}
+          </div>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+```
+
+#### frontend/src/components/MessageCard.tsx
+```tsx
+import { motion } from 'framer-motion';
+
+interface Message {
+  id: string;
+  sender_id: string;
+  content: string;
+  read_by: string[];
+}
+
+export default function MessageCard({ message }: { message: Message }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      className={`p-2 rounded ${message.sender_id === localStorage.getItem('user_id') ? 'bg-blue-100 ml-auto' : 'bg-gray-100'}`}
+    >
+      <p>{message.content}</p>
+      <p className="text-xs text-gray-500">
+        {message.read_by.includes(localStorage.getItem('user_id') || '') ? 'Read' : 'Sent'}
+      </p>
+    </motion.div>
+  );
+}
+```
+
+#### frontend/src/components/StoryCard.tsx
+```tsx
+import { motion } from 'framer-motion';
+
+interface Story {
+  id: string;
+  user_id: string;
+  media?: { file_key: string; media_type: string }[];
+}
+
+export default function StoryCard({ story }: { story: Story }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.8 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className="w-24 h-24 rounded-full overflow-hidden"
+      whileHover={{ scale: 1.1 }}
+    >
+      <a href={`/profile/${story.user_id}`}>
+        {story.media?.[0]?.media_type.startsWith('image') ? (
+          <img src={story.media[0].file_key} alt="Story" className="w-full h-full object-cover" />
+        ) : (
+          <video src={story.media?.[0]?.file_key} className="w-full h-full object-cover" />
+        )}
+      </a>
+    </motion.div>
+  );
+}
+```
+
+#### frontend/src/components/AnalyticsDashboard.tsx
+```tsx
+import { useQuery } from '@tanstack/react-query';
+import axios from 'axios';
+import { motion } from 'framer-motion';
+
+export default function AnalyticsDashboard({ postId }: { postId: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['analytics', postId],
+    queryFn: async () => {
+      const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/api/analytics/post/${postId}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      return res.data;
+    }
+  });
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="bg-white p-4 rounded shadow-md mt-4"
+    >
+      <h3 className="text-lg font-bold">Post Analytics</h3>
+      {isLoading ? (
+        <p>Loading...</p>
+      ) : (
+        <div>
+          <p>Views: {data?.views}</p>
+          <p>Likes: {data?.likes}</p>
+          <p>Comments: {data?.comments}</p>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+```
+
+#### frontend/src/lib/websocket.ts
+```tsx
+export function connectWebSocket(conversationId: string, onMessage: (data: any) => void) {
+  const token = localStorage.getItem('token');
+  const ws = new WebSocket(`${process.env.NEXT_PUBLIC_WS_URL}/${conversationId}?token=${token}`);
+  
+  ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    onMessage(data);
+  };
+
+  ws.onclose = () => {
+    console.log('WebSocket closed, attempting to reconnect...');
+    setTimeout(() => connectWebSocket(conversationId, onMessage), 1000);
+  };
+
+  ws.onerror = (error) => {
+    console.error('WebSocket error:', error);
+  };
+
+  return ws;
+}
+```
+
+#### frontend/src/types.ts
+```tsx
+export interface User {
+  id: string;
+  username: string;
+  display_name?: string;
+  bio?: string;
+  avatar_url?: string;
+  follower_count: number;
+  following_count: number;
+}
+
+export interface Post {
+  id: string;
+  user_id: string;
+  caption?: string;
+  hashtags: string[];
+  like_count: number;
+  comment_count: number;
+  view_count: number;
+  media?: { file_key: string; media_type: string }[];
+}
+
+export interface Message {
+  id: string;
+  sender_id: string;
+  content: string;
+  created_at: string;
+  read_by: string[];
+}
+
+export interface Story {
+  id: string;
+  user_id: string;
+  created_at: string;
+  expires_at: string;
+  media?: { file_key: string; media_type: string }[];
+}
+```
+
+#### frontend/src/tests/PostCard.test.tsx
+```tsx
+import { render, screen } from '@testing-library/react';
+import PostCard from '../components/PostCard';
+
+test('renders PostCard with caption', () => {
+  const post = {
+    id: '1',
+    user_id: 'user1',
+    caption: 'Test caption',
+    hashtags: ['test'],
+    like_count: 0,
+    comment_count: 0,
+    media: []
+  };
+  render(<PostCard post={post} />);
+  expect(screen.getByText('Test caption')).toBeInTheDocument();
+});
+```
+
+#### frontend/src/tests/Messages.test.tsx
+```tsx
+import { render, screen } from '@testing-library/react';
+import Messages from '../pages/messages';
+
+jest.mock('@tanstack/react-query', () => ({
+  useQuery: () => ({ data: [], isLoading: false })
+}));
+
+test('renders Messages page', () => {
+  render(<Messages />);
+  expect(screen.getByText('Messages')).toBeInTheDocument();
+});
+```
+
+#### frontend/tsconfig.json
+```json
+{
+  "compilerOptions": {
+    "target": "es5",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "baseUrl": "."
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules"]
+}
+```
+
+#### frontend/next.config.js
+```javascript
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  reactStrictMode: true,
+  images: {
+    domains: ['localhost', 'your-r2-domain.com']
+  }
+};
+
+module.exports = nextConfig;
+```
+
+### Other Project Files
+
+#### .github/workflows/ci.yml
+```yaml
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+      - name: Run tests
+        run: |
+          cd backend
+          pytest
+      - name: Build Docker image
+        run: |
+          cd backend
+          docker build -t social-network-backend .
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm install
+      - name: Run tests
+        run: |
+          cd frontend
+          npm test
+      - name: Build
+        run: |
+          cd frontend
+          npm run build
+```
+
+#### docker-compose.yml
+```yaml
+version: '3.8'
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://user:password@postgres:5432/social_network
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin123
+      - MINIO_BUCKET=social-media
+      - JWT_SECRET=your-secret-key
+    depends_on:
+      - postgres
+      - redis
+      - minio
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
+    depends_on:
+      - backend
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=social_network
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+  redis:
+    image: redis:7
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin123
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+volumes:
+  postgres_data:
+  minio_data:
+```
+
+#### README.md
+```markdown
+# Social Network MVP
+
+An Instagram-style social network with authentication, profiles, posts, stories, messaging, follows, search, moderation, and analytics.
+
+## Setup
+
+1. **Clone the repository**:
+   ```bash
+   git clone <repository-url>
+   cd social-network-mvp
+   ```
+
+2. **Environment Variables**:
+   - Backend: Create `backend/.env`:
+     ```env
+     DATABASE_URL=postgresql://user:password@localhost:5432/social_network
+     REDIS_URL=redis://localhost:6379/0
+     MINIO_ENDPOINT=http://localhost:9000
+     MINIO_ACCESS_KEY=minioadmin
+     MINIO_SECRET_KEY=minioadmin123
+     MINIO_BUCKET=social-media
+     JWT_SECRET=your-secret-key
+     ```
+   - Frontend: Create `frontend/.env.local`:
+     ```env
+     NEXT_PUBLIC_API_URL=http://localhost:8000
+     NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
+     ```
+
+3. **Run Locally**:
+   ```bash
+   docker-compose up --build
+   ```
+   - Apply migrations:
+     ```bash
+     docker-compose exec postgres psql -U user -d social_network -f /app/migrations/001_initial_schema.sql
+     docker-compose exec postgres psql -U user -d social_network -f /app/migrations/002_add_likes_comments_notifications.sql
+     docker-compose exec postgres psql -U user -d social_network -f /app/migrations/003_add_websocket_metadata.sql
+     docker-compose exec postgres psql -U user -d social_network -f /app/migrations/004_add_stories_follows_analytics.sql
+     ```
+
+4. **Access**:
+   - Frontend: http://localhost:3000
+   - Backend API: http://localhost:8000
+   - MinIO Console: http://localhost:9001
+
+## Testing
+
+- Backend:
+  ```bash
+  cd backend
+  pytest
+  ```
+- Frontend:
+  ```bash
+  cd frontend
+  npm test
+  ```
+
+## Deployment
+
+1. **Supabase (Database)**:
+   - Create a new project on Supabase.
+   - Update `DATABASE_URL` in `backend/.env` with Supabase credentials.
+   - Run migrations using Supabase SQL editor.
+
+2. **Cloudflare R2 (Storage)**:
+   - Create an R2 bucket.
+   - Update `MINIO_*` variables in `backend/.env` with R2 credentials and endpoint.
+
+3. **Netlify (Frontend)**:
+   - Deploy `frontend/` to Netlify.
+   - Set environment variables in Netlify dashboard:
+     ```
+     NEXT_PUBLIC_API_URL=https://your-backend-url
+     NEXT_PUBLIC_WS_URL=wss://your-backend-url/ws
+     ```
+
+4. **Vercel (Backend)**:
+   - Deploy `backend/` to Vercel.
+   - Set environment variables in Vercel dashboard (see `backend/.env`).
+   - Ensure WebSocket support is enabled.
+
+5. **Run Deployment Script**:
+   ```bash
+   chmod +x deploy.sh
+   ./deploy.sh
+   ```
+
+## Features
+
+- Authentication (register, login)
+- User profiles (edit, private accounts)
+- Posts (create, edit, delete, like, comment, multiple media)
+- Stories (24-hour expiring media)
+- Direct messaging (real-time, group chats, read receipts)
+- Follows and personalized feed
+- Search (users, hashtags)
+- Notifications (likes, comments, follows)
+- Moderation (report content, admin dashboard)
+- Analytics (post views, likes, comments)
+
+## Testing for 20 Users
+
+1. Register 20 users via `/register`.
+2. Create posts, stories, and conversations.
+3. Test likes, comments, follows, and notifications.
+4. Use admin dashboard to review reports.
+5. Monitor performance using browser dev tools.
+
+## Monitoring
+
+- Supabase: Check DB size (<500MB for free tier).
+- R2: Monitor storage (<10GB for free tier).
+- Netlify: Monitor bandwidth (<100GB for free tier).
+```
+
+#### .gitignore
+```gitignore
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Python
+backend/__pycache__/
+backend/.venv/
+backend/*.pyc
+
+# Env
+backend/.env
+frontend/.env.local
+
+# Docker
+*.log
+*.tar.gz
+```
+
+#### figma.json
+```json
+{
+  "name": "Social Network MVP Design",
+  "components": {
+    "NavBar": {
+      "background": "#ffffff",
+      "padding": "16px",
+      "shadow": "0 2px 4px rgba(0,0,0,0.1)",
+      "links": [
+        {"name": "Home", "href": "/"},
+        {"name": "Search", "href": "/search"},
+        {"name": "Create Post", "href": "/post/create"},
+        {"name": "Stories", "href": "/stories"},
+        {"name": "Messages", "href": "/messages"},
+        {"name": "Notifications", "href": "/notifications"},
+        {"name": "Admin", "href": "/admin"},
+        {"name": "Profile", "href": "/profile/me"},
+        {"name": "Logout", "action": "logout"}
+      ]
+    },
+    "PostCard": {
+      "background": "#ffffff",
+      "padding": "16px",
+      "borderRadius": "8px",
+      "shadow": "0 2px 4px rgba(0,0,0,0.1)",
+      "elements": [
+        {"type": "text", "name": "user_id", "style": "text-blue-500"},
+        {"type": "text", "name": "caption", "style": "mt-2"},
+        {"type": "text", "name": "hashtags", "style": "text-sm text-gray-500"},
+        {"type": "media", "name": "media", "style": "w-full rounded mt-2"},
+        {"type": "button", "name": "like", "style": "p-2"},
+        {"type": "button", "name": "report", "style": "text-red-500"},
+        {"type": "form", "name": "comment", "style": "mt-2"}
+      ]
+    },
+    "StoryCard": {
+      "width": "96px",
+      "height": "96px",
+      "borderRadius": "50%",
+      "overflow": "hidden",
+      "animation": "scale on hover"
+    }
+  }
+}
+```
+
+#### deploy.sh
+```bash
+#!/bin/bash
+
+# Deploy backend to Vercel
+cd backend
+vercel --prod
+
+# Deploy frontend to Netlify
+cd ../frontend
+netlify deploy --prod
+
+# Apply migrations to Supabase
+supabase db push
+
+# Configure R2 bucket
+aws s3api create-bucket --bucket social-media --endpoint-url https://your-r2-endpoint
+```
