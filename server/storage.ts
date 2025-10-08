@@ -252,7 +252,11 @@ export class MemStorage implements IStorage {
 
     const posts = Array.from(this.posts.values())
       .filter((p) => feedUserIds.includes(p.userId) && !p.isArchived)
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .sort((a, b) => {
+        const aTime = a.createdAt ? a.createdAt.getTime() : 0;
+        const bTime = b.createdAt ? b.createdAt.getTime() : 0;
+        return bTime - aTime;
+      })
       .slice(0, 20);
 
     const postsWithUser: PostWithUser[] = [];
@@ -270,7 +274,11 @@ export class MemStorage implements IStorage {
   async getUserPosts(userId: string, currentUserId?: string): Promise<PostWithUser[]> {
     const posts = Array.from(this.posts.values())
       .filter((p) => p.userId === userId && !p.isArchived)
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      .sort((a, b) => {
+        const aTime = a.createdAt ? a.createdAt.getTime() : 0;
+        const bTime = b.createdAt ? b.createdAt.getTime() : 0;
+        return bTime - aTime;
+      });
 
     const user = this.users.get(userId);
     if (!user) return [];
