@@ -1,0 +1,399 @@
+Perfect! Let’s design a **matching backend API spec** for your messaging system so your frontend features (mute, block, delete, read receipts, message search) work smoothly. I’ll include **endpoints, HTTP methods, request/response examples, and notes** for integration.
+
+---
+
+## **1. Get Conversations**
+
+**Endpoint:** `GET /api/conversations`
+**Description:** Fetch all conversations for the logged-in user.
+
+**Response:**
+
+```json
+[
+  {
+    "id": "conv_123",
+    "title": "Project Team",Perfect! Let’s design a **matching backend API spec** for your messaging system so your frontend features (mute, block, delete, read receipts, message search) work smoothly. I’ll include **endpoints, HTTP methods, request/response examples, and notes** for integration.
+
+---
+
+## **1. Get Conversations**
+
+**Endpoint:** `GET /api/conversations`
+**Description:** Fetch all conversations for the logged-in user.
+
+**Response:**
+
+```json
+[
+  {
+    "id": "conv_123",
+    "title": "Project Team",
+    "participants": [
+      { "id": "user_1", "username": "Alice", "avatarUrl": "", "isOnline": true },
+      { "id": "user_2", "username": "Bob", "avatarUrl": "", "isOnline": false }
+    ],
+    "lastMessage": {
+      "id": "msg_456",
+      "content": "See you tomorrow",
+      "senderId": "user_1",
+      "createdAt": "2025-10-08T10:00:00Z",
+      "read": true
+    },
+    "unreadCount": 2,
+    "isMuted": false,
+    "readReceiptEnabled": true
+  }
+]
+```
+
+---
+
+## **2. Get Messages for a Conversation**
+
+**Endpoint:** `GET /api/messages?conversationId=conv_123&search=text&date=YYYY-MM-DD`
+**Description:** Fetch messages optionally filtered by text and date.
+
+**Response:**
+
+```json
+[
+  {
+    "id": "msg_456",
+    "content": "Hello!",
+    "senderId": "user_1",
+    "createdAt": "2025-10-08T10:00:00Z",
+    "read": true
+  },
+  {
+    "id": "msg_457",
+    "content": "Hi Alice",
+    "senderId": "user_2",
+    "createdAt": "2025-10-08T10:05:00Z",
+    "read": false
+  }
+]
+```
+
+---
+
+## **3. Send Message**
+
+**Endpoint:** `POST /api/messages`
+**Request Body:**
+
+```json
+{
+  "conversationId": "conv_123",
+  "content": "Hello, team!"
+}
+```
+
+**Response:** 200 OK with the saved message object (optional for optimistic updates).
+
+---
+
+## **4. Mute Conversation**
+
+**Endpoint:** `POST /api/conversations/mute`
+**Request Body:**
+
+```json
+{
+  "conversationId": "conv_123",
+  "duration": "1h" // could be "forever", "1h", "1d"
+}
+```
+
+**Response:** 200 OK with updated conversation info.
+
+---
+
+## **5. Delete Conversation**
+
+**Endpoint:** `DELETE /api/conversations/:conversationId`
+**Request Example:**
+
+```
+DELETE /api/conversations/conv_123
+```
+
+**Response:** 200 OK
+
+* Frontend removes conversation and resets selected conversation.
+
+---
+
+## **6. Block User**
+
+**Endpoint:** `POST /api/users/block`
+**Request Body:**
+
+```json
+{
+  "userId": "user_2"
+}
+```
+
+**Response:** 200 OK
+
+* Future messages from blocked user are not delivered.
+
+---
+
+## **7. Toggle Read Receipt**
+
+**Endpoint:** `POST /api/conversations/read-receipt-toggle`
+**Request Body:**
+
+```json
+{
+  "conversationId": "conv_123"
+}
+```
+
+**Response:** 200 OK with updated conversation:
+
+```json
+{
+  "id": "conv_123",
+  "readReceiptEnabled": false
+}
+```
+
+---
+
+## **8. Optional: Mark Message as Read**
+
+**Endpoint:** `POST /api/messages/read`
+**Request Body:**
+
+```json
+{
+  "conversationId": "conv_123",
+  "messageIds": ["msg_456", "msg_457"]
+}
+```
+
+**Response:** 200 OK
+
+> Note: This helps update read status in real-time for read receipts.
+
+---
+
+## **9. Audio/Video Call**
+
+These are placeholders; you can integrate **WebRTC** or external services.
+
+**Endpoint (optional):**
+
+```
+POST /api/conversations/:conversationId/call
+```
+
+**Request Body:**
+
+```json
+{
+  "type": "video" // or "audio"
+}
+```
+
+**Response:** 200 OK with call session info.
+
+---
+
+### **Integration Notes**
+
+1. **Mute / Block / Delete / Read Receipt** → update conversation in DB, then invalidate frontend queries.
+2. **Search messages** → backend filtering by text & date reduces frontend overhead.
+3. **Read receipts** → update `read` field per message; toggle `readReceiptEnabled` per conversation.
+4. **Optimistic updates** → frontend can show sent message instantly; backend confirms later.
+
+---
+
+If you want, I can also provide a **ready-to-use Node.js/Express backend skeleton** with these APIs and mock data so your frontend can work immediately.
+
+Do you want me to create that backend skeleton?
+
+    "participants": [
+      { "id": "user_1", "username": "Alice", "avatarUrl": "", "isOnline": true },
+      { "id": "user_2", "username": "Bob", "avatarUrl": "", "isOnline": false }
+    ],
+    "lastMessage": {
+      "id": "msg_456",
+      "content": "See you tomorrow",
+      "senderId": "user_1",
+      "createdAt": "2025-10-08T10:00:00Z",
+      "read": true
+    },
+    "unreadCount": 2,
+    "isMuted": false,
+    "readReceiptEnabled": true
+  }
+]
+```
+
+---
+
+## **2. Get Messages for a Conversation**
+
+**Endpoint:** `GET /api/messages?conversationId=conv_123&search=text&date=YYYY-MM-DD`
+**Description:** Fetch messages optionally filtered by text and date.
+
+**Response:**
+
+```json
+[
+  {
+    "id": "msg_456",
+    "content": "Hello!",
+    "senderId": "user_1",
+    "createdAt": "2025-10-08T10:00:00Z",
+    "read": true
+  },
+  {
+    "id": "msg_457",
+    "content": "Hi Alice",
+    "senderId": "user_2",
+    "createdAt": "2025-10-08T10:05:00Z",
+    "read": false
+  }
+]
+```
+
+---
+
+## **3. Send Message**
+
+**Endpoint:** `POST /api/messages`
+**Request Body:**
+
+```json
+{
+  "conversationId": "conv_123",
+  "content": "Hello, team!"
+}
+```
+
+**Response:** 200 OK with the saved message object (optional for optimistic updates).
+
+---
+
+## **4. Mute Conversation**
+
+**Endpoint:** `POST /api/conversations/mute`
+**Request Body:**
+
+```json
+{
+  "conversationId": "conv_123",
+  "duration": "1h" // could be "forever", "1h", "1d"
+}
+```
+
+**Response:** 200 OK with updated conversation info.
+
+---
+
+## **5. Delete Conversation**
+
+**Endpoint:** `DELETE /api/conversations/:conversationId`
+**Request Example:**
+
+```
+DELETE /api/conversations/conv_123
+```
+
+**Response:** 200 OK
+
+* Frontend removes conversation and resets selected conversation.
+
+---
+
+## **6. Block User**
+
+**Endpoint:** `POST /api/users/block`
+**Request Body:**
+
+```json
+{
+  "userId": "user_2"
+}
+```
+
+**Response:** 200 OK
+
+* Future messages from blocked user are not delivered.
+
+---
+
+## **7. Toggle Read Receipt**
+
+**Endpoint:** `POST /api/conversations/read-receipt-toggle`
+**Request Body:**
+
+```json
+{
+  "conversationId": "conv_123"
+}
+```
+
+**Response:** 200 OK with updated conversation:
+
+```json
+{
+  "id": "conv_123",
+  "readReceiptEnabled": false
+}
+```
+
+---
+
+## **8. Optional: Mark Message as Read**
+
+**Endpoint:** `POST /api/messages/read`
+**Request Body:**
+
+```json
+{
+  "conversationId": "conv_123",
+  "messageIds": ["msg_456", "msg_457"]
+}
+```
+
+**Response:** 200 OK
+
+> Note: This helps update read status in real-time for read receipts.
+
+---
+
+## **9. Audio/Video Call**
+
+These are placeholders; you can integrate **WebRTC** or external services.
+
+**Endpoint (optional):**
+
+```
+POST /api/conversations/:conversationId/call
+```
+
+**Request Body:**
+
+```json
+{
+  "type": "video" // or "audio"
+}
+```
+
+**Response:** 200 OK with call session info.
+
+---
+
+### **Integration Notes**
+
+1. **Mute / Block / Delete / Read Receipt** → update conversation in DB, then invalidate frontend queries.
+2. **Search messages** → backend filtering by text & date reduces frontend overhead.
+3. **Read receipts** → update `read` field per message; toggle `readReceiptEnabled` per conversation.
+4. **Optimistic updates** → frontend can show sent message instantly; backend confirms later.
+

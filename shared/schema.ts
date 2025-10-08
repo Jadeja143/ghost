@@ -19,6 +19,7 @@ export const users = pgTable("users", {
   lastSeen: timestamp("last_seen", { withTimezone: true }),
   isOnline: boolean("is_online").default(false),
   closeFriends: jsonb("close_friends").$type<string[]>().default(sql`'[]'::jsonb`),
+  blockedUsers: jsonb("blocked_users").$type<string[]>().default(sql`'[]'::jsonb`),
 });
 
 // Posts table
@@ -65,6 +66,9 @@ export const conversations = pgTable("conversations", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
   participantIds: jsonb("participant_ids").$type<string[]>().notNull(),
+  isMuted: boolean("is_muted").default(false),
+  mutedUntil: timestamp("muted_until", { withTimezone: true }),
+  readReceiptEnabled: boolean("read_receipt_enabled").default(true),
 });
 
 // Messages table
@@ -136,6 +140,7 @@ export const insertUserSchema = createInsertSchema(users, {
   email: z.string().email().optional(),
   displayName: z.string().max(100).optional(),
   bio: z.string().max(500).optional(),
+  blockedUsers: z.array(z.string()).optional(),
 }).omit({ id: true, joinedAt: true, isActive: true, verified: true, lastSeen: true, isOnline: true, passwordHash: true }).extend({
   password: z.string().min(8),
 });
@@ -159,6 +164,9 @@ export const insertMessageSchema = createInsertSchema(messages, {
 export const insertConversationSchema = createInsertSchema(conversations, {
   participantIds: z.array(z.string()).min(2),
   title: z.string().max(100).optional(),
+  isMuted: z.boolean().optional(),
+  mutedUntil: z.date().optional(),
+  readReceiptEnabled: z.boolean().optional(),
 }).omit({ id: true, createdAt: true, lastMessageAt: true });
 
 export const insertStorySchema = createInsertSchema(stories, {
