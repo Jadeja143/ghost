@@ -5,11 +5,13 @@ import { Plus } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { useState } from 'react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { CreateStoryDialog } from '@/components/create-story-dialog';
 import type { StoryWithUser } from '@shared/schema';
 
 export function StoriesCarousel() {
   const { user } = useAuth();
   const [selectedStory, setSelectedStory] = useState<StoryWithUser | null>(null);
+  const [createStoryOpen, setCreateStoryOpen] = useState(false);
 
   const { data: stories } = useQuery<StoryWithUser[]>({
     queryKey: ['/api/stories'],
@@ -23,6 +25,7 @@ export function StoriesCarousel() {
           {user && (
             <div
               className="flex flex-col items-center gap-2 min-w-[72px] cursor-pointer hover-elevate active-elevate-2 -m-2 p-2 rounded-lg"
+              onClick={() => setCreateStoryOpen(true)}
               data-testid="button-create-story"
             >
               <div className="relative">
@@ -104,6 +107,9 @@ export function StoriesCarousel() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Create Story Dialog */}
+      <CreateStoryDialog open={createStoryOpen} onOpenChange={setCreateStoryOpen} />
     </>
   );
 }
