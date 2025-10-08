@@ -53,6 +53,7 @@ export interface IStorage {
   updateUser(id: string, updates: Partial<User>): Promise<User | undefined>;
   getUserProfile(id: string, currentUserId?: string): Promise<UserProfile | undefined>;
   searchUsers(query: string): Promise<User[]>;
+  getCloseFriends(userId: string): Promise<User[]>;
 
   // Post operations
   createPost(post: InsertPost): Promise<Post>;
@@ -161,6 +162,17 @@ export class DatabaseStorage implements IStorage {
         ilike(users.displayName, `%${query}%`)
       ))
       .limit(20);
+  }
+
+  async getCloseFriends(userId: string): Promise<User[]> {
+    const user = await this.getUser(userId);
+    if (!user || !user.closeFriends) return [];
+
+    const closeFriendIds = user.closeFriends as string[];
+    if (closeFriendIds.length === 0) return [];
+
+    return db.select().from(users)
+      .where(inArray(users.id, closeFriendIds));
   }
 
   // Post operations

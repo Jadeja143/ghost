@@ -2,7 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { WebSocketServer, WebSocket } from "ws";
-import { insertUserSchema, insertPostSchema, insertCommentSchema, insertMessageSchema, insertConversationSchema, insertStorySchema, insertReportSchema } from "@shared/schema";
+import { insertUserSchema, insertPostSchema, insertCommentSchema, insertMessageSchema, insertConversationSchema, insertStorySchema, insertReportSchema, type User, type SafeUserDTO } from "@shared/schema";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 
@@ -31,6 +31,20 @@ async function authMiddleware(req: AuthRequest, res: Response, next: NextFunctio
   } catch (error) {
     res.status(401).json({ error: 'Invalid token' });
   }
+}
+
+// Helper function to sanitize user data (remove sensitive fields)
+function sanitizeUser(user: User): SafeUserDTO {
+  return {
+    id: user.id,
+    username: user.username,
+    displayName: user.displayName,
+    avatarUrl: user.avatarUrl,
+    verified: user.verified,
+    bio: user.bio,
+    isPrivate: user.isPrivate,
+    isOnline: user.isOnline,
+  };
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -184,6 +198,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Search users (for mentions)
+  app.get('/api/users/search', authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const query = req.query.q as string;
+      if (!query) {
+        return res.json([]);
+      }
+      const users = await storage.searchUsers(query);
+      const sanitizedUsers = users.map(sanitizeUser);
+      res.json(sanitizedUsers);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Get close friends
+  app.get('/api/users/close-friends', authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const closeFriends = await storage.getCloseFriends(req.userId!);
+      const sanitizedCloseFriends = closeFriends.map(sanitizeUser);
+      res.json(sanitizedCloseFriends);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Get followers
+  app.get('/api/users/followers', authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const followers = await storage.getFollowers(req.userId!);
+      const sanitizedFollowers = followers.map(sanitizeUser);
+      res.json(sanitizedFollowers);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
   // ==================== POST ROUTES ====================
 
   // Create post
@@ -196,7 +247,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const post = await storage.createPost(validatedData);
       const postWithUser = await storage.getPostWithUser(post.id, req.userId);
-      res.json(postWithUser);
+      res.json({ ...postWithUser, user: sanitizeUser(postWithUser!.user) });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
@@ -206,7 +257,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/posts/feed', authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
       const posts = await storage.getFeed(req.userId!);
-      res.json(posts);
+      const sanitizedPosts = posts.map(post => ({
+        ...post,
+        user: sanitizeUser(post.user)
+      }));
+      res.json(sanitizedPosts);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
@@ -216,7 +271,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/posts/user/:userId', authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
       const posts = await storage.getUserPosts(req.params.userId, req.userId);
-      res.json(posts);
+      const sanitizedPosts = posts.map(post => ({
+        ...post,
+        user: sanitizeUser(post.user)
+      }));
+      res.json(sanitizedPosts);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
@@ -229,7 +288,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!post) {
         return res.status(404).json({ error: 'Post not found' });
       }
-      res.json(post);
+      res.json({ ...post, user: sanitizeUser(post.user) });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
@@ -248,7 +307,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const updatedPost = await storage.updatePost(req.params.id, req.body);
       const postWithUser = await storage.getPostWithUser(updatedPost!.id, req.userId);
-      res.json(postWithUser);
+      res.json({ ...postWithUser, user: sanitizeUser(postWithUser!.user) });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
@@ -335,7 +394,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const user = await storage.getUser(req.userId!);
-      res.json({ ...comment, user });
+      res.json({ ...comment, user: sanitizeUser(user!) });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
@@ -345,7 +404,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/posts/:id/comments', authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
       const comments = await storage.getComments(req.params.id);
-      res.json(comments);
+      const sanitizedComments = comments.map(comment => ({
+        ...comment,
+        user: sanitizeUser(comment.user)
+      }));
+      res.json(sanitizedComments);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
@@ -372,7 +435,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/conversations', authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
       const conversations = await storage.getConversations(req.userId!);
-      res.json(conversations);
+      const sanitizedConversations = conversations.map(conversation => ({
+        ...conversation,
+        participants: conversation.participants.map(sanitizeUser)
+      }));
+      res.json(sanitizedConversations);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
@@ -388,6 +455,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const message = await storage.sendMessage(validatedData);
       const sender = await storage.getUser(req.userId!);
+      const sanitizedSender = sanitizeUser(sender!);
 
       // Notify other participants via WebSocket
       const conversation = await storage.getConversations(req.userId!);
@@ -398,13 +466,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (participantId !== req.userId) {
             sendToUser(participantId, {
               type: 'message',
-              data: { ...message, sender }
+              data: { ...message, sender: sanitizedSender }
             });
           }
         });
       }
 
-      res.json({ ...message, sender });
+      res.json({ ...message, sender: sanitizedSender });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
@@ -415,7 +483,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const messages = await storage.getMessages(req.params.conversationId);
       await storage.markMessagesAsRead(req.params.conversationId, req.userId!);
-      res.json(messages);
+      const sanitizedMessages = messages.map(message => ({
+        ...message,
+        sender: sanitizeUser(message.sender)
+      }));
+      res.json(sanitizedMessages);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
@@ -433,7 +505,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const story = await storage.createStory(validatedData);
       const user = await storage.getUser(req.userId!);
-      res.json({ ...story, user });
+      res.json({ ...story, user: sanitizeUser(user!) });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
@@ -443,7 +515,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/stories', authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
       const stories = await storage.getActiveStories(req.userId!);
-      res.json(stories);
+      const sanitizedStories = stories.map(story => ({
+        ...story,
+        user: sanitizeUser(story.user)
+      }));
+      res.json(sanitizedStories);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
@@ -455,7 +531,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/notifications', authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
       const notifications = await storage.getNotifications(req.userId!);
-      res.json(notifications);
+      const sanitizedNotifications = notifications.map(notification => ({
+        ...notification,
+        actor: sanitizeUser(notification.actor)
+      }));
+      res.json(sanitizedNotifications);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
@@ -481,7 +561,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json([]);
       }
       const users = await storage.searchUsers(query);
-      res.json(users);
+      const sanitizedUsers = users.map(sanitizeUser);
+      res.json(sanitizedUsers);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
@@ -495,7 +576,109 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json([]);
       }
       const posts = await storage.searchPosts(query);
-      res.json(posts);
+      const sanitizedPosts = posts.map(post => ({
+        ...post,
+        user: sanitizeUser(post.user)
+      }));
+      res.json(sanitizedPosts);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Search locations (mock implementation)
+  app.get('/api/locations/search', authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const query = req.query.q as string;
+      if (!query || query.length < 2) {
+        return res.json([]);
+      }
+
+      const mockLocations = [
+        { id: 'loc-1', name: 'New York, NY', lat: 40.7128, lng: -74.0060 },
+        { id: 'loc-2', name: 'Los Angeles, CA', lat: 34.0522, lng: -118.2437 },
+        { id: 'loc-3', name: 'San Francisco, CA', lat: 37.7749, lng: -122.4194 },
+        { id: 'loc-4', name: 'Chicago, IL', lat: 41.8781, lng: -87.6298 },
+        { id: 'loc-5', name: 'Miami, FL', lat: 25.7617, lng: -80.1918 },
+        { id: 'loc-6', name: 'Seattle, WA', lat: 47.6062, lng: -122.3321 },
+        { id: 'loc-7', name: 'Austin, TX', lat: 30.2672, lng: -97.7431 },
+        { id: 'loc-8', name: 'Boston, MA', lat: 42.3601, lng: -71.0589 },
+        { id: 'loc-9', name: 'Denver, CO', lat: 39.7392, lng: -104.9903 },
+        { id: 'loc-10', name: 'Portland, OR', lat: 45.5152, lng: -122.6784 },
+      ];
+
+      const results = mockLocations.filter(loc => 
+        loc.name.toLowerCase().includes(query.toLowerCase())
+      );
+
+      res.json(results);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Search music (mock implementation)
+  app.get('/api/music/search', authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const query = req.query.q as string;
+      if (!query || query.length < 2) {
+        return res.json([]);
+      }
+
+      const mockMusicTracks = [
+        { 
+          id: 'music-1', 
+          title: 'Blinding Lights', 
+          artist: 'The Weeknd',
+          url: 'https://example.com/track1.mp3',
+          coverUrl: 'https://example.com/cover1.jpg',
+          startTime: 0,
+          duration: 30
+        },
+        { 
+          id: 'music-2', 
+          title: 'Shape of You', 
+          artist: 'Ed Sheeran',
+          url: 'https://example.com/track2.mp3',
+          coverUrl: 'https://example.com/cover2.jpg',
+          startTime: 0,
+          duration: 30
+        },
+        { 
+          id: 'music-3', 
+          title: 'Levitating', 
+          artist: 'Dua Lipa',
+          url: 'https://example.com/track3.mp3',
+          coverUrl: 'https://example.com/cover3.jpg',
+          startTime: 0,
+          duration: 30
+        },
+        { 
+          id: 'music-4', 
+          title: 'Watermelon Sugar', 
+          artist: 'Harry Styles',
+          url: 'https://example.com/track4.mp3',
+          coverUrl: 'https://example.com/cover4.jpg',
+          startTime: 0,
+          duration: 30
+        },
+        { 
+          id: 'music-5', 
+          title: 'Good 4 U', 
+          artist: 'Olivia Rodrigo',
+          url: 'https://example.com/track5.mp3',
+          coverUrl: 'https://example.com/cover5.jpg',
+          startTime: 0,
+          duration: 30
+        },
+      ];
+
+      const results = mockMusicTracks.filter(track => 
+        track.title.toLowerCase().includes(query.toLowerCase()) ||
+        track.artist.toLowerCase().includes(query.toLowerCase())
+      );
+
+      res.json(results);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }

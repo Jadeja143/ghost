@@ -18,6 +18,7 @@ export const users = pgTable("users", {
   isPrivate: boolean("is_private").default(false),
   lastSeen: timestamp("last_seen", { withTimezone: true }),
   isOnline: boolean("is_online").default(false),
+  closeFriends: jsonb("close_friends").$type<string[]>().default(sql`'[]'::jsonb`),
 });
 
 // Posts table
@@ -87,7 +88,7 @@ export const notifications = pgTable("notifications", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
-// Stories table
+// Stories table (Enhanced with Instagram-like features)
 export const stories = pgTable("stories", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull(),
@@ -95,6 +96,19 @@ export const stories = pgTable("stories", {
   mediaType: varchar("media_type", { length: 20 }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  // Multi-media story grouping (for multiple uploads in one session)
+  groupId: varchar("group_id"),
+  sequenceNumber: integer("sequence_number").default(0),
+  // Enhanced features
+  canvasData: jsonb("canvas_data").$type<any>(), // Fabric.js canvas JSON
+  mentions: jsonb("mentions").$type<string[]>().default(sql`'[]'::jsonb`),
+  hashtags: jsonb("hashtags").$type<string[]>().default(sql`'[]'::jsonb`),
+  location: jsonb("location").$type<{ id: string; name: string; lat?: number; lng?: number }>(),
+  musicClip: jsonb("music_clip").$type<{ id: string; title: string; artist: string; url: string; startTime: number; duration: number }>(),
+  link: text("link"),
+  privacy: varchar("privacy", { length: 20 }).default("public"), // public, close_friends, selected
+  selectedViewers: jsonb("selected_viewers").$type<string[]>().default(sql`'[]'::jsonb`),
+  interactiveStickers: jsonb("interactive_stickers").$type<any[]>().default(sql`'[]'::jsonb`), // polls, questions, etc.
 });
 
 // Follows table
@@ -150,6 +164,27 @@ export const insertConversationSchema = createInsertSchema(conversations, {
 export const insertStorySchema = createInsertSchema(stories, {
   mediaUrl: z.string().url(),
   mediaType: z.enum(["image", "video"]),
+  mentions: z.array(z.string()).optional(),
+  hashtags: z.array(z.string()).optional(),
+  privacy: z.enum(["public", "close_friends", "selected"]).optional(),
+  selectedViewers: z.array(z.string()).optional(),
+  location: z.object({
+    id: z.string(),
+    name: z.string(),
+    lat: z.number().optional(),
+    lng: z.number().optional(),
+  }).optional(),
+  musicClip: z.object({
+    id: z.string(),
+    title: z.string(),
+    artist: z.string(),
+    url: z.string(),
+    startTime: z.number(),
+    duration: z.number(),
+  }).optional(),
+  link: z.string().url().optional(),
+  canvasData: z.any().optional(),
+  interactiveStickers: z.array(z.any()).optional(),
 }).omit({ id: true, createdAt: true, expiresAt: true });
 
 export const insertFollowSchema = createInsertSchema(follows).omit({ createdAt: true });
@@ -222,3 +257,117 @@ export type NotificationWithActor = Notification & {
 export type StoryWithUser = Story & {
   user: User;
 };
+
+// Safe user DTO for public endpoints (excludes sensitive data)
+export type SafeUserDTO = Pick<User, 'id' | 'username' | 'displayName' | 'avatarUrl' | 'verified' | 'bio' | 'isPrivate' | 'isOnline'>;
+
+// Story creation types (Frontend types for enhanced story editor)
+export interface MediaItem {
+  id: string;
+  url: string;
+  type: 'image' | 'video';
+  file?: File;
+  thumbnail?: string;
+}
+
+export interface TextOverlay {
+  id: string;
+  text: string;
+  x: number;
+  y: number;
+  fontSize: number;
+  fontFamily: string;
+  color: string;
+  backgroundColor?: string;
+  rotation?: number;
+  width?: number;
+}
+
+export interface DrawingPath {
+  id: string;
+  points: number[];
+  color: string;
+  width: number;
+}
+
+export interface InteractiveSticker {
+  id: string;
+  type: 'poll' | 'question' | 'quiz' | 'countdown' | 'slider';
+  x: number;
+  y: number;
+  data: any; // Type-specific data
+}
+
+export interface PollSticker extends InteractiveSticker {
+  type: 'poll';
+  data: {
+    question: string;
+    options: string[];
+  };
+}
+
+export interface QuestionSticker extends InteractiveSticker {
+  type: 'question';
+  data: {
+    question: string;
+  };
+}
+
+export interface QuizSticker extends InteractiveSticker {
+  type: 'quiz';
+  data: {
+    question: string;
+    options: string[];
+    correctAnswer: number;
+  };
+}
+
+export interface CountdownSticker extends InteractiveSticker {
+  type: 'countdown';
+  data: {
+    name: string;
+    endTime: Date;
+  };
+}
+
+export interface SliderSticker extends InteractiveSticker {
+  type: 'slider';
+  data: {
+    question: string;
+    emoji: string;
+  };
+}
+
+export interface LocationData {
+  id: string;
+  name: string;
+  lat?: number;
+  lng?: number;
+}
+
+export interface MusicClipData {
+  id: string;
+  title: string;
+  artist: string;
+  url: string;
+  coverUrl?: string;
+  startTime: number;
+  duration: number;
+}
+
+export interface StoryDraft {
+  mediaItems: MediaItem[];
+  activeMediaId: string | null;
+  canvasData: any; // Fabric.js canvas JSON
+  textOverlays: TextOverlay[];
+  drawings: DrawingPath[];
+  filter?: string;
+  mentions: string[];
+  hashtags: string[];
+  location?: LocationData;
+  musicClip?: MusicClipData;
+  link?: string;
+  privacy: 'public' | 'close_friends' | 'selected';
+  selectedViewers: string[];
+  interactiveStickers: InteractiveSticker[];
+}
