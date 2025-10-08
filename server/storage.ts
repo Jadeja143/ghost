@@ -35,12 +35,16 @@ import {
   reports,
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/neon-serverless";
-import { Pool } from "@neondatabase/serverless";
+import { Pool, neonConfig } from "@neondatabase/serverless";
 import { eq, and, or, desc, sql, ilike, inArray } from "drizzle-orm";
+import ws from "ws";
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL environment variable is required");
 }
+
+// Configure Neon to use the ws library for WebSocket connections
+neonConfig.webSocketConstructor = ws;
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const db = drizzle(pool);
