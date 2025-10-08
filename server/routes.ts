@@ -6,11 +6,11 @@ import { insertUserSchema, insertPostSchema, insertCommentSchema, insertMessageS
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 
-const JWT_SECRET = process.env.JWT_SECRET;
-
-if (!JWT_SECRET) {
+if (!process.env.JWT_SECRET) {
   throw new Error('JWT_SECRET environment variable is required for authentication');
 }
+
+const JWT_SECRET: string = process.env.JWT_SECRET;
 
 // Authentication middleware
 interface AuthRequest extends Request {
