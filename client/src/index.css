@@ -350,4 +350,161 @@
   .border.hover-elevate:not(.no-hover-interaction-elevate)::after {
     inset: -1px;
   }
+
+  /* Auth page gradient background */
+  .auth-gradient-bg {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, 
+      hsl(270, 80%, 60%) 0%, 
+      hsl(330, 80%, 65%) 25%,
+      hsl(20, 90%, 60%) 50%,
+      hsl(270, 80%, 60%) 75%,
+      hsl(330, 80%, 65%) 100%
+    );
+    background-size: 400% 400%;
+    animation: gradient-shift 15s ease infinite;
+    opacity: 1;
+  }
+
+  .dark .auth-gradient-bg {
+    background: linear-gradient(135deg, 
+      hsl(270, 70%, 30%) 0%, 
+      hsl(330, 70%, 35%) 25%,
+      hsl(20, 80%, 40%) 50%,
+      hsl(270, 70%, 30%) 75%,
+      hsl(330, 70%, 35%) 100%
+    );
+    background-size: 400% 400%;
+    animation: gradient-shift 15s ease infinite;
+  }
+
+  @keyframes gradient-shift {
+    0%, 100% {
+      background-position: 0% 50%;
+    }
+    50% {
+      background-position: 100% 50%;
+    }
+  }
+
+  /* Glassmorphism card */
+  .glassmorphism-card {
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+  }
+
+  .dark .glassmorphism-card {
+    background: rgba(30, 30, 40, 0.4);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+  }
+
+  /* Floating orbs */
+  .floating-orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(80px);
+    opacity: 0.6;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .floating-orb-1 {
+    width: 300px;
+    height: 300px;
+    background: radial-gradient(circle, hsl(270, 80%, 60%) 0%, transparent 70%);
+    top: 10%;
+    left: 10%;
+  }
+
+  .floating-orb-2 {
+    width: 400px;
+    height: 400px;
+    background: radial-gradient(circle, hsl(330, 80%, 65%) 0%, transparent 70%);
+    bottom: 10%;
+    right: 5%;
+  }
+
+  .floating-orb-3 {
+    width: 250px;
+    height: 250px;
+    background: radial-gradient(circle, hsl(20, 90%, 60%) 0%, transparent 70%);
+    top: 50%;
+    right: 20%;
+  }
+
+  /* Auth input with focus animations */
+  .auth-input {
+    transition: all 0.3s ease;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .auth-input:focus {
+    border-color: hsl(270, 80%, 60%);
+    box-shadow: 0 0 0 3px hsla(270, 80%, 60%, 0.2);
+    background: rgba(255, 255, 255, 0.15);
+    transform: translateY(-1px);
+  }
+
+  .dark .auth-input {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .dark .auth-input:focus {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: hsl(270, 70%, 50%);
+    box-shadow: 0 0 0 3px hsla(270, 70%, 50%, 0.2);
+  }
+
+  /* Auth button with gradient */
+  .auth-button {
+    background: linear-gradient(135deg, hsl(270, 80%, 60%) 0%, hsl(330, 80%, 65%) 50%, hsl(20, 90%, 60%) 100%);
+    border: none;
+    color: white;
+    font-weight: 600;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.3s ease;
+  }
+
+  .auth-button::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, hsl(270, 80%, 70%) 0%, hsl(330, 80%, 75%) 50%, hsl(20, 90%, 70%) 100%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+
+  .auth-button:hover::before {
+    opacity: 1;
+  }
+
+  .auth-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+  }
+
+  .auth-button:active {
+    transform: translateY(0);
+  }
+
+  .auth-button:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .auth-button > * {
+    position: relative;
+    z-index: 1;
+  }
 }
