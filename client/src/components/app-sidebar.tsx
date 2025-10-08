@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/sidebar';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { CreatePostDialog } from './create-post-dialog';
+import { MayaLogo } from './maya-logo';
 import { useState } from 'react';
 
 export function AppSidebar() {
@@ -31,7 +32,7 @@ export function AppSidebar() {
   return (
     <Sidebar>
       <SidebarHeader className="p-6">
-        <h1 className="text-2xl font-bold">Social</h1>
+        <MayaLogo />
         {user && (
           <div className="flex items-center gap-3 mt-4 p-3 rounded-lg bg-sidebar-accent">
             <Avatar className="h-10 w-10">

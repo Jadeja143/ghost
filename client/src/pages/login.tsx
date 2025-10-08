@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
+import { MayaLogo } from '@/components/maya-logo';
 
 export default function Login() {
   const [, navigate] = useLocation();
@@ -38,6 +39,9 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1 text-center">
+          <div className="flex justify-center mb-4">
+            <MayaLogo />
+          </div>
           <CardTitle className="text-3xl font-bold tracking-tight">Welcome back</CardTitle>
           <CardDescription className="text-muted-foreground">
             Sign in to your account to continue

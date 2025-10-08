@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
+import { MayaLogo } from '@/components/maya-logo';
 
 export default function Register() {
   const [, navigate] = useLocation();
@@ -59,9 +60,12 @@ export default function Register() {
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1 text-center">
+          <div className="flex justify-center mb-4">
+            <MayaLogo />
+          </div>
           <CardTitle className="text-3xl font-bold tracking-tight">Create account</CardTitle>
           <CardDescription className="text-muted-foreground">
-            Join our community and start sharing
+            Join Maya and start sharing your moments
           </CardDescription>
         </CardHeader>
         <CardContent>
