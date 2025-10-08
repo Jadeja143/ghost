@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'wouter';
 import { useAuth } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
@@ -6,9 +6,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Sparkles } from 'lucide-react';
+import { Loader2, Sparkles, Eye, EyeOff } from 'lucide-react';
 import { MayaLogo } from '@/components/maya-logo';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
+import zxcvbn from 'zxcvbn';
 
 export default function Register() {
   const [, navigate] = useLocation();
@@ -19,11 +20,69 @@ export default function Register() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordStrength, setPasswordStrength] = useState(0);
+  const usernameRef = useRef<HTMLInputElement>(null);
+
+  // Auto-focus first input on mount
+  useEffect(() => {
+    usernameRef.current?.focus();
+  }, []);
+
+  // Calculate password strength
+  useEffect(() => {
+    if (password && password.length > 0) {
+      try {
+        const result = zxcvbn(password);
+        setPasswordStrength(result?.score ?? 0);
+      } catch {
+        setPasswordStrength(0);
+      }
+    } else {
+      setPasswordStrength(0);
+    }
+  }, [password]);
+
+  const getPasswordStrengthColor = () => {
+    switch (passwordStrength) {
+      case 0:
+      case 1:
+        return 'bg-red-500';
+      case 2:
+        return 'bg-orange-500';
+      case 3:
+        return 'bg-yellow-500';
+      case 4:
+        return 'bg-green-500';
+      default:
+        return 'bg-gray-300';
+    }
+  };
+
+  const getPasswordStrengthLabel = () => {
+    switch (passwordStrength) {
+      case 0:
+      case 1:
+        return 'Weak';
+      case 2:
+        return 'Fair';
+      case 3:
+        return 'Good';
+      case 4:
+        return 'Strong';
+      default:
+        return '';
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setPasswordError('');
 
     if (password !== confirmPassword) {
+      setPasswordError('Passwords do not match');
       toast({
         variant: 'destructive',
         title: 'Passwords do not match',
@@ -33,6 +92,7 @@ export default function Register() {
     }
 
     if (password.length < 8) {
+      setPasswordError('Password too short');
       toast({
         variant: 'destructive',
         title: 'Password too short',
@@ -101,156 +161,237 @@ export default function Register() {
         }}
       />
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6 }}
-        className="w-full max-w-md relative z-10"
-      >
-        <Card className="glassmorphism-card border-white/20" data-testid="card-register">
-          <CardHeader className="space-y-1 text-center">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.2, duration: 0.5 }}
-              className="flex justify-center mb-4"
-            >
-              <MayaLogo />
-            </motion.div>
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3, duration: 0.5 }}
-            >
-              <CardTitle className="text-3xl font-bold tracking-tight">Create account</CardTitle>
-            </motion.div>
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.4, duration: 0.5 }}
-            >
-              <CardDescription className="text-muted-foreground">
-                Join Maya and start sharing your moments
-              </CardDescription>
-            </motion.div>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
+      <AnimatePresence mode="wait">
+        <motion.div
+          key="register"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -20 }}
+          transition={{ duration: 0.6 }}
+          className="w-full max-w-md relative z-10"
+        >
+          <Card className="glassmorphism-card border-white/20" data-testid="card-register">
+            <CardHeader className="space-y-1 text-center">
               <motion.div
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.5, duration: 0.5 }}
-                className="space-y-2"
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.2, duration: 0.5 }}
+                className="flex justify-center mb-4"
               >
-                <Label htmlFor="username">Username</Label>
-                <Input
-                  id="username"
-                  data-testid="input-username"
-                  placeholder="Choose a username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  required
-                  disabled={isLoading}
-                  pattern="[a-zA-Z0-9_]+"
-                  title="Username can only contain letters, numbers, and underscores"
-                  className="auth-input transition-all duration-300"
-                />
-              </motion.div>
-              <motion.div
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.6, duration: 0.5 }}
-                className="space-y-2"
-              >
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  data-testid="input-email"
-                  type="email"
-                  placeholder="Enter your email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  disabled={isLoading}
-                  className="auth-input transition-all duration-300"
-                />
-              </motion.div>
-              <motion.div
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.7, duration: 0.5 }}
-                className="space-y-2"
-              >
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  data-testid="input-password"
-                  type="password"
-                  placeholder="Create a password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  disabled={isLoading}
-                  className="auth-input transition-all duration-300"
-                />
-              </motion.div>
-              <motion.div
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.8, duration: 0.5 }}
-                className="space-y-2"
-              >
-                <Label htmlFor="confirmPassword">Confirm Password</Label>
-                <Input
-                  id="confirmPassword"
-                  data-testid="input-confirm-password"
-                  type="password"
-                  placeholder="Confirm your password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  required
-                  disabled={isLoading}
-                  className="auth-input transition-all duration-300"
-                />
+                <MayaLogo />
               </motion.div>
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.9, duration: 0.5 }}
+                transition={{ delay: 0.3, duration: 0.5 }}
               >
-                <Button
-                  type="submit"
-                  className="w-full auth-button group"
-                  disabled={isLoading}
-                  data-testid="button-register"
-                >
-                  {isLoading ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" data-testid="loader-register" />
-                  ) : (
-                    <Sparkles className="mr-2 h-4 w-4 group-hover:animate-pulse" data-testid="icon-sparkles" />
-                  )}
-                  Create account
-                </Button>
+                <CardTitle className="text-3xl font-bold tracking-tight">Create account</CardTitle>
               </motion.div>
-            </form>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 1.0, duration: 0.5 }}
-              className="mt-6 text-center text-sm text-muted-foreground"
-            >
-              Already have an account?{' '}
-              <button
-                type="button"
-                className="font-medium text-transparent bg-gradient-to-r from-purple-600 via-pink-500 to-orange-400 bg-clip-text hover:from-purple-500 hover:via-pink-400 hover:to-orange-300 transition-all duration-300"
-                onClick={() => navigate('/login')}
-                data-testid="link-login"
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.4, duration: 0.5 }}
               >
-                Sign in
-              </button>
-            </motion.div>
-          </CardContent>
-        </Card>
-      </motion.div>
+                <CardDescription className="text-muted-foreground">
+                  Join Maya and start sharing your moments
+                </CardDescription>
+              </motion.div>
+            </CardHeader>
+            <CardContent>
+              {isLoading && (
+                <div className="mb-4">
+                  <div className="h-1 w-full bg-gray-200 rounded-full overflow-hidden">
+                    <motion.div
+                      className="h-full bg-gradient-to-r from-purple-600 via-pink-500 to-orange-400"
+                      initial={{ width: "0%" }}
+                      animate={{ width: "100%" }}
+                      transition={{ duration: 1.5, ease: "easeInOut" }}
+                    />
+                  </div>
+                </div>
+              )}
+              
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <motion.div
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.5, duration: 0.5 }}
+                  className="space-y-2"
+                >
+                  <Label htmlFor="username">Username</Label>
+                  <Input
+                    ref={usernameRef}
+                    id="username"
+                    data-testid="input-username"
+                    placeholder="Choose a username"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    required
+                    disabled={isLoading}
+                    pattern="[a-zA-Z0-9_]+"
+                    title="Username can only contain letters, numbers, and underscores"
+                    className="auth-input transition-all duration-300"
+                    aria-label="Username input field"
+                  />
+                </motion.div>
+                <motion.div
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.6, duration: 0.5 }}
+                  className="space-y-2"
+                >
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    data-testid="input-email"
+                    type="email"
+                    placeholder="Enter your email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    disabled={isLoading}
+                    className="auth-input transition-all duration-300"
+                    aria-label="Email input field"
+                  />
+                </motion.div>
+                <motion.div
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.7, duration: 0.5 }}
+                  className="space-y-2"
+                >
+                  <Label htmlFor="password">Password</Label>
+                  <div className="relative">
+                    <Input
+                      id="password"
+                      data-testid="input-password"
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="Create a password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                      disabled={isLoading}
+                      className="auth-input transition-all duration-300 pr-10"
+                      aria-label="Password input field"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                  
+                  {password && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="space-y-1"
+                    >
+                      <div className="flex gap-1">
+                        {[0, 1, 2, 3, 4].map((level) => (
+                          <div
+                            key={level}
+                            className={`h-1 flex-1 rounded-full transition-all duration-300 ${
+                              level <= passwordStrength ? getPasswordStrengthColor() : 'bg-gray-300'
+                            }`}
+                          />
+                        ))}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Password strength: <span className="font-medium">{getPasswordStrengthLabel()}</span>
+                      </p>
+                    </motion.div>
+                  )}
+                </motion.div>
+                <motion.div
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.8, duration: 0.5 }}
+                  className="space-y-2"
+                >
+                  <Label htmlFor="confirmPassword">Confirm Password</Label>
+                  <div className="relative">
+                    <Input
+                      id="confirmPassword"
+                      data-testid="input-confirm-password"
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      placeholder="Confirm your password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      required
+                      disabled={isLoading}
+                      className="auth-input transition-all duration-300 pr-10"
+                      aria-label="Confirm password input field"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition"
+                      aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}
+                    >
+                      {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </motion.div>
+                
+                <AnimatePresence>
+                  {passwordError && (
+                    <motion.p
+                      initial={{ opacity: 0, y: -5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -5 }}
+                      className="text-destructive text-sm"
+                    >
+                      {passwordError}
+                    </motion.p>
+                  )}
+                </AnimatePresence>
+
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.9, duration: 0.5 }}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                >
+                  <Button
+                    type="submit"
+                    className="w-full auth-button group"
+                    disabled={isLoading}
+                    data-testid="button-register"
+                  >
+                    {isLoading ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" data-testid="loader-register" />
+                    ) : (
+                      <Sparkles className="mr-2 h-4 w-4 group-hover:animate-pulse" data-testid="icon-sparkles" />
+                    )}
+                    Create account
+                  </Button>
+                </motion.div>
+              </form>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 1.0, duration: 0.5 }}
+                className="mt-6 text-center text-sm text-muted-foreground"
+              >
+                Already have an account?{' '}
+                <button
+                  type="button"
+                  className="font-medium text-transparent bg-gradient-to-r from-purple-600 via-pink-500 to-orange-400 bg-clip-text hover:from-purple-500 hover:via-pink-400 hover:to-orange-300 transition-all duration-300"
+                  onClick={() => navigate('/login')}
+                  data-testid="link-login"
+                >
+                  Sign in
+                </button>
+              </motion.div>
+            </CardContent>
+          </Card>
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
 }
