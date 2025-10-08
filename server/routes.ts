@@ -235,6 +235,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Block user
+  app.post('/api/users/block', authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const { userId } = req.body;
+
+      if (!userId) {
+        return res.status(400).json({ error: 'userId is required' });
+      }
+
+      if (userId === req.userId) {
+        return res.status(400).json({ error: 'You cannot block yourself' });
+      }
+
+      const updatedUser = await storage.blockUser(req.userId!, userId);
+      if (!updatedUser) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      res.json({ message: 'User blocked successfully' });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
   // ==================== POST ROUTES ====================
 
   // Create post
@@ -481,13 +505,95 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get messages
   app.get('/api/messages/:conversationId', authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
-      const messages = await storage.getMessages(req.params.conversationId);
+      const filters: { search?: string; date?: string } = {};
+      
+      if (req.query.search) {
+        filters.search = req.query.search as string;
+      }
+      
+      if (req.query.date) {
+        filters.date = req.query.date as string;
+      }
+
+      const messages = await storage.getMessages(req.params.conversationId, req.userId!, filters);
       await storage.markMessagesAsRead(req.params.conversationId, req.userId!);
       const sanitizedMessages = messages.map(message => ({
         ...message,
         sender: sanitizeUser(message.sender)
       }));
       res.json(sanitizedMessages);
+    } catch (error: any) {
+      if (error.message === 'User is not a participant in this conversation') {
+        return res.status(403).json({ error: error.message });
+      }
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Mute conversation
+  app.post('/api/conversations/mute', authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const { conversationId, duration } = req.body;
+
+      if (!conversationId || !duration) {
+        return res.status(400).json({ error: 'conversationId and duration are required' });
+      }
+
+      const isParticipant = await storage.isParticipant(conversationId, req.userId!);
+      if (!isParticipant) {
+        return res.status(403).json({ error: 'You are not a participant in this conversation' });
+      }
+
+      const conversation = await storage.muteConversation(conversationId, duration);
+      if (!conversation) {
+        return res.status(404).json({ error: 'Conversation not found' });
+      }
+
+      res.json(conversation);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Delete conversation
+  app.delete('/api/conversations/:conversationId', authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const isParticipant = await storage.isParticipant(req.params.conversationId, req.userId!);
+      if (!isParticipant) {
+        return res.status(403).json({ error: 'You are not a participant in this conversation' });
+      }
+
+      const deleted = await storage.deleteConversation(req.params.conversationId);
+      if (!deleted) {
+        return res.status(404).json({ error: 'Conversation not found' });
+      }
+
+      res.json({ message: 'Conversation deleted successfully' });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Toggle read receipts
+  app.post('/api/conversations/read-receipt-toggle', authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const { conversationId } = req.body;
+
+      if (!conversationId) {
+        return res.status(400).json({ error: 'conversationId is required' });
+      }
+
+      const isParticipant = await storage.isParticipant(conversationId, req.userId!);
+      if (!isParticipant) {
+        return res.status(403).json({ error: 'You are not a participant in this conversation' });
+      }
+
+      const conversation = await storage.toggleReadReceipt(conversationId);
+      if (!conversation) {
+        return res.status(404).json({ error: 'Conversation not found' });
+      }
+
+      res.json(conversation);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }

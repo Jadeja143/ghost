@@ -87,8 +87,13 @@ export interface IStorage {
   createConversation(conversation: InsertConversation): Promise<Conversation>;
   getConversations(userId: string): Promise<ConversationWithDetails[]>;
   sendMessage(message: InsertMessage): Promise<Message>;
-  getMessages(conversationId: string): Promise<MessageWithSender[]>;
+  getMessages(conversationId: string, userId: string, filters?: { search?: string; date?: string }): Promise<MessageWithSender[]>;
   markMessagesAsRead(conversationId: string, userId: string): Promise<void>;
+  muteConversation(conversationId: string, duration: string): Promise<Conversation | undefined>;
+  deleteConversation(conversationId: string): Promise<boolean>;
+  toggleReadReceipt(conversationId: string): Promise<Conversation | undefined>;
+  isParticipant(conversationId: string, userId: string): Promise<boolean>;
+  blockUser(userId: string, userIdToBlock: string): Promise<User | undefined>;
 
   // Story operations
   createStory(story: InsertStory): Promise<Story>;
@@ -485,14 +490,46 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async getMessages(conversationId: string): Promise<MessageWithSender[]> {
+  async getMessages(conversationId: string, userId: string, filters?: { search?: string; date?: string }): Promise<MessageWithSender[]> {
+    const isParticipant = await this.isParticipant(conversationId, userId);
+    if (!isParticipant) {
+      throw new Error('User is not a participant in this conversation');
+    }
+
+    let query = db.select({
+      message: messages,
+      sender: users,
+    })
+      .from(messages)
+      .innerJoin(users, eq(messages.senderId, users.id))
+      .where(eq(messages.conversationId, conversationId));
+
+    let conditions = [eq(messages.conversationId, conversationId)];
+
+    if (filters?.search) {
+      conditions.push(ilike(messages.content, `%${filters.search}%`));
+    }
+
+    if (filters?.date) {
+      const targetDate = new Date(filters.date);
+      const nextDay = new Date(targetDate);
+      nextDay.setDate(nextDay.getDate() + 1);
+      
+      conditions.push(
+        and(
+          sql`${messages.createdAt} >= ${targetDate}`,
+          sql`${messages.createdAt} < ${nextDay}`
+        )!
+      );
+    }
+
     const result = await db.select({
       message: messages,
       sender: users,
     })
       .from(messages)
       .innerJoin(users, eq(messages.senderId, users.id))
-      .where(eq(messages.conversationId, conversationId))
+      .where(conditions.length > 1 ? and(...conditions) : conditions[0])
       .orderBy(messages.createdAt);
 
     return result.map(row => ({
@@ -515,6 +552,82 @@ export class DatabaseStorage implements IStorage {
           .where(eq(messages.id, message.id));
       }
     }
+  }
+
+  async muteConversation(conversationId: string, duration: string): Promise<Conversation | undefined> {
+    let mutedUntil: Date | null = null;
+    
+    if (duration !== 'forever') {
+      const now = new Date();
+      if (duration.endsWith('h')) {
+        const hours = parseInt(duration);
+        mutedUntil = new Date(now.getTime() + hours * 60 * 60 * 1000);
+      } else if (duration.endsWith('d')) {
+        const days = parseInt(duration);
+        mutedUntil = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+      }
+    }
+
+    const result = await db.update(conversations)
+      .set({ 
+        isMuted: true, 
+        mutedUntil: mutedUntil 
+      })
+      .where(eq(conversations.id, conversationId))
+      .returning();
+
+    return result[0];
+  }
+
+  async deleteConversation(conversationId: string): Promise<boolean> {
+    await db.delete(messages).where(eq(messages.conversationId, conversationId));
+    const result = await db.delete(conversations).where(eq(conversations.id, conversationId)).returning();
+    return result.length > 0;
+  }
+
+  async toggleReadReceipt(conversationId: string): Promise<Conversation | undefined> {
+    const conversation = await db.select()
+      .from(conversations)
+      .where(eq(conversations.id, conversationId))
+      .limit(1);
+
+    if (!conversation[0]) return undefined;
+
+    const result = await db.update(conversations)
+      .set({ readReceiptEnabled: !conversation[0].readReceiptEnabled })
+      .where(eq(conversations.id, conversationId))
+      .returning();
+
+    return result[0];
+  }
+
+  async isParticipant(conversationId: string, userId: string): Promise<boolean> {
+    const conversation = await db.select()
+      .from(conversations)
+      .where(eq(conversations.id, conversationId))
+      .limit(1);
+
+    if (!conversation[0]) return false;
+
+    const participantIds = conversation[0].participantIds as string[];
+    return participantIds.includes(userId);
+  }
+
+  async blockUser(userId: string, userIdToBlock: string): Promise<User | undefined> {
+    const user = await this.getUser(userId);
+    if (!user) return undefined;
+
+    const blockedUsers = (user.blockedUsers as string[]) || [];
+    if (!blockedUsers.includes(userIdToBlock)) {
+      blockedUsers.push(userIdToBlock);
+    }
+
+    const result = await db.update(users)
+      .set({ blockedUsers })
+      .where(eq(users.id, userId))
+      .returning();
+
+    return result[0];
   }
 
   // Story operations
