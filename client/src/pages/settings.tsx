@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useAuth } from '@/lib/auth';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,9 +11,10 @@ import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { useMutation } from '@tanstack/react-query';
 import { apiRequest, queryClient } from '@/lib/queryClient';
-import { Loader2, Upload } from 'lucide-react';
+import { Loader2, Upload, Camera, FileImage, Link as LinkIcon, X } from 'lucide-react';
 import { useLocation } from 'wouter';
 import { useTheme } from '@/lib/theme';
+import { motion, AnimatePresence } from 'framer-motion';
 
 export default function Settings() {
   const { user, logout } = useAuth();
@@ -25,6 +26,12 @@ export default function Settings() {
   const [bio, setBio] = useState(user?.bio || '');
   const [isPrivate, setIsPrivate] = useState(user?.isPrivate || false);
   const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || '');
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [fileSize, setFileSize] = useState<number | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [showUrlInput, setShowUrlInput] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const updateProfileMutation = useMutation({
     mutationFn: (data: any) => apiRequest('PATCH', '/api/users/me', data),
@@ -43,6 +50,94 @@ export default function Settings() {
       });
     },
   });
+
+  const processFile = (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      toast({
+        variant: 'destructive',
+        title: 'Invalid file type',
+        description: 'Please select an image file (JPG, PNG, WEBP)',
+      });
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        variant: 'destructive',
+        title: 'File too large',
+        description: 'Please select an image under 5MB',
+      });
+      return;
+    }
+
+    setIsProcessing(true);
+    setFileSize(file.size);
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setAvatarPreview(reader.result as string);
+      setAvatarUrl(reader.result as string);
+      setIsProcessing(false);
+    };
+    reader.onerror = () => {
+      toast({
+        variant: 'destructive',
+        title: 'Failed to process image',
+        description: 'Please try again',
+      });
+      setIsProcessing(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processFile(file);
+    }
+  };
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      processFile(files[0]);
+    }
+  };
+
+  const handleRemoveAvatar = () => {
+    setAvatarPreview(null);
+    setAvatarUrl('');
+    setFileSize(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  };
 
   const handleSave = () => {
     updateProfileMutation.mutate({
@@ -71,26 +166,181 @@ export default function Settings() {
           <CardDescription>Update your profile details and preferences</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Avatar */}
-          <div className="flex items-center gap-6">
-            <Avatar className="h-24 w-24">
-              <AvatarImage src={avatarUrl || user.avatarUrl || undefined} />
-              <AvatarFallback className="text-2xl">
-                {user.username[0].toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
-            <div className="space-y-2">
-              <Label htmlFor="avatar">Avatar URL</Label>
-              <Input
-                id="avatar"
-                data-testid="input-avatar-url"
-                placeholder="https://example.com/avatar.jpg"
-                value={avatarUrl}
-                onChange={(e) => setAvatarUrl(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                Paste a URL to your profile picture
-              </p>
+          {/* Avatar Upload Section */}
+          <div className="space-y-4">
+            <Label className="text-base font-semibold">Profile Picture</Label>
+            
+            {/* Avatar Preview and Upload Zone */}
+            <div className="flex flex-col sm:flex-row items-center gap-6">
+              {/* Avatar with Drag and Drop */}
+              <motion.div
+                className="relative group"
+                whileHover={{ scale: 1.02 }}
+                transition={{ duration: 0.2 }}
+                onDragEnter={handleDragEnter}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleAvatarChange}
+                  data-testid="input-avatar-file"
+                />
+                
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`
+                    relative cursor-pointer transition-all duration-300
+                    ${isDragging ? 'ring-4 ring-primary ring-offset-4 scale-105' : 'hover:ring-4 hover:ring-primary/50 hover:ring-offset-2'}
+                  `}
+                  data-testid="avatar-upload-zone"
+                >
+                  <Avatar className="h-32 w-32 border-2 border-border">
+                    <AvatarImage src={avatarPreview || avatarUrl || user.avatarUrl || undefined} />
+                    <AvatarFallback className="text-4xl bg-gradient-to-br from-primary to-purple-500 text-white">
+                      {user.username[0].toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                  
+                  {/* Hover Overlay */}
+                  <motion.div
+                    className="absolute inset-0 flex items-center justify-center bg-black/60 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                    initial={false}
+                  >
+                    <Camera className="h-8 w-8 text-white" />
+                  </motion.div>
+
+                  {/* Processing Overlay */}
+                  <AnimatePresence>
+                    {isProcessing && (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="absolute inset-0 flex items-center justify-center bg-black/80 rounded-full"
+                      >
+                        <Loader2 className="h-8 w-8 text-white animate-spin" />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Drag Indicator */}
+                  <AnimatePresence>
+                    {isDragging && (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="absolute inset-0 flex items-center justify-center bg-primary/20 rounded-full border-2 border-primary border-dashed"
+                      >
+                        <Upload className="h-8 w-8 text-primary" />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </motion.div>
+
+              {/* Upload Actions */}
+              <div className="flex-1 space-y-3 w-full sm:w-auto">
+                <p className="text-sm text-muted-foreground">
+                  Click on avatar to upload or drag and drop
+                </p>
+                
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isProcessing}
+                    data-testid="button-upload-avatar"
+                    className="border-primary/50 hover:bg-primary/5"
+                  >
+                    <Upload className="mr-2 h-4 w-4" />
+                    Choose File
+                  </Button>
+                  
+                  {(avatarPreview || avatarUrl) && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleRemoveAvatar}
+                      disabled={isProcessing}
+                      data-testid="button-remove-avatar"
+                      className="border-destructive/50 hover:bg-destructive/5 hover:text-destructive"
+                    >
+                      <X className="mr-2 h-4 w-4" />
+                      Remove
+                    </Button>
+                  )}
+
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowUrlInput(!showUrlInput)}
+                    data-testid="button-toggle-url-input"
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <LinkIcon className="mr-2 h-4 w-4" />
+                    {showUrlInput ? 'Hide URL' : 'Use URL'}
+                  </Button>
+                </div>
+
+                {/* File Info */}
+                <AnimatePresence>
+                  {fileSize && !showUrlInput && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="flex items-center gap-2 text-sm text-muted-foreground overflow-hidden"
+                    >
+                      <FileImage className="h-4 w-4" />
+                      <span>{formatFileSize(fileSize)}</span>
+                      {fileSize > 5 * 1024 * 1024 && (
+                        <span className="text-orange-500 text-xs">
+                          (Consider compressing)
+                        </span>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* URL Input (Alternative) */}
+                <AnimatePresence>
+                  {showUrlInput && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="space-y-2 overflow-hidden"
+                    >
+                      <Input
+                        id="avatar-url"
+                        data-testid="input-avatar-url"
+                        placeholder="https://example.com/avatar.jpg"
+                        value={avatarUrl}
+                        onChange={(e) => {
+                          setAvatarUrl(e.target.value);
+                          setAvatarPreview(null);
+                          setFileSize(null);
+                        }}
+                        className="focus:ring-2 focus:ring-primary/20 transition-all"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Paste a direct URL to your profile picture
+                      </p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <p className="text-xs text-muted-foreground">
+                  Recommended: Square image, JPG or PNG under 5MB
+                </p>
+              </div>
             </div>
           </div>
 
